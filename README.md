@@ -228,15 +228,61 @@ Each message file is named: `{from}-{to}-{timestamp}.json`
 npm run build
 ```
 
+### Testing
+
+The project uses Jest for testing with TypeScript support via ts-jest.
+
+#### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run tests with coverage report
+npm run test:coverage
+```
+
+#### Test Structure
+
+```
+tests/
+├── helpers.ts           # Test utility functions
+├── index.test.ts        # Unit tests for core functionality
+├── integration.test.ts  # Integration tests for file operations
+└── server.test.ts       # Server initialization tests
+```
+
+#### Coverage
+
+Coverage reports are generated in the `coverage/` directory when running `npm run test:coverage`.
+
+**Note on Coverage Metrics**: The main `index.ts` file is a server entry point that runs as a standalone MCP process and cannot be directly unit tested through imports. The integration tests provide comprehensive functional coverage of all message handling operations (send, read, list, delete, clear). For improved coverage metrics in future iterations, consider refactoring the server logic into separate, importable modules.
+
+The test suite includes:
+- 43 comprehensive tests covering all MCP tool operations
+- Unit tests for message storage, filtering, and deletion
+- Integration tests for concurrent operations and error scenarios
+- Server initialization and configuration tests
+
 ### Project Structure
 
 ```
 agent-comm-system/
 ├── src/
 │   └── index.ts          # Main MCP server implementation
+├── tests/                # Test files
+│   ├── helpers.ts        # Test utilities
+│   ├── index.test.ts     # Unit tests
+│   ├── integration.test.ts # Integration tests
+│   └── server.test.ts    # Server initialization tests
 ├── dist/                 # Compiled JavaScript output
+├── coverage/             # Test coverage reports
 ├── package.json
 ├── tsconfig.json
+├── jest.config.js
 └── README.md
 ```
 
