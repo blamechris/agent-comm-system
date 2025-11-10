@@ -147,7 +147,9 @@ clear_messages({
 
 ## Workflow Examples
 
-### Example 1: Orchestrator → Coder → Reviewer
+For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md](EXAMPLES.md).
+
+### Quick Example: Orchestrator → Coder → Reviewer
 
 1. **Orchestrator** sends a task to the coder:
    ```
