@@ -28,15 +28,29 @@ jobs:
       - name: Determine runner
         id: runner-logic
         run: |
-          # Check for [skip-ci] in commit message
+          echo "Event name: ${{ github.event_name }}"
+          echo "Commit message: ${{ github.event.head_commit.message }}"
+          echo "PR title: ${{ github.event.pull_request.title }}"
+
+          # Check for [skip-ci] in commit message or PR title
           COMMIT_MSG="${{ github.event.head_commit.message }}"
-          if [[ "$COMMIT_MSG" == *"[skip-ci]"* ]] || [[ "${{ github.event.pull_request.title }}" == *"[skip-ci]"* ]]; then
+          PR_TITLE="${{ github.event.pull_request.title }}"
+
+          if [[ -n "$COMMIT_MSG" && "$COMMIT_MSG" == *"[skip-ci]"* ]]; then
+            echo "Skipping CI due to [skip-ci] in commit message"
+            echo "should-skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if [[ -n "$PR_TITLE" && "$PR_TITLE" == *"[skip-ci]"* ]]; then
+            echo "Skipping CI due to [skip-ci] in PR title"
             echo "should-skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           # Manual override
           if [[ "${{ github.event.inputs.runner_mode }}" == "skip" ]]; then
+            echo "Skipping CI due to manual override"
             echo "should-skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi
@@ -45,26 +59,32 @@ jobs:
 
           # Check for manual runner selection
           if [[ "${{ github.event.inputs.runner_mode }}" != "" && "${{ github.event.inputs.runner_mode }}" != "auto" ]]; then
+            echo "Using manual runner selection: ${{ github.event.inputs.runner_mode }}"
             echo "runner-type=${{ github.event.inputs.runner_mode }}" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           # Check commit message flags (for push events)
-          if [[ "$COMMIT_MSG" == *"[self-hosted]"* ]]; then
+          if [[ -n "$COMMIT_MSG" && "$COMMIT_MSG" == *"[self-hosted]"* ]]; then
+            echo "Using self-hosted runner (from commit message)"
             echo "runner-type=self-hosted" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          if [[ "$COMMIT_MSG" == *"[github]"* ]]; then
+          if [[ -n "$COMMIT_MSG" && "$COMMIT_MSG" == *"[github]"* ]]; then
+            echo "Using GitHub runner (from commit message)"
             echo "runner-type=github" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           # Auto-select based on day of month
           day=$(date +%d)
+          echo "Auto-selecting runner based on day: $day"
           if [ $day -le 25 ]; then
+            echo "Using self-hosted runner (day <= 25)"
             echo "runner-type=self-hosted" >> $GITHUB_OUTPUT
           else
+            echo "Using GitHub runner (day > 25)"
             echo "runner-type=github" >> $GITHUB_OUTPUT
           fi
 
