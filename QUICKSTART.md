@@ -46,6 +46,7 @@ After restarting Claude Desktop, you should see the agent communication tools av
 > "What tools do you have available?"
 
 You should see 5 tools:
+
 - `send_message`
 - `read_messages`
 - `list_messages`
@@ -71,15 +72,18 @@ Then in a different Claude instance (or the same one), read the message:
 ## Troubleshooting
 
 ### "Tools not showing up"
+
 - Make sure you restarted Claude Desktop after configuration
 - Verify the path in your config is absolute and correct
 - Check that the build completed successfully (`npm run build`)
 
 ### "Cannot find module"
+
 - Ensure you ran `npm install` and `npm run build`
 - Check that `dist/index.js` exists
 
 ### "Permission denied"
+
 - Make sure the dist/index.js file is executable: `chmod +x dist/index.js`
 
 ## Support

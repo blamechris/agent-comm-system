@@ -7,6 +7,7 @@ This document provides practical examples of using the Agent Communication Syste
 ### Step 1: Orchestrator sends tasks to specialized agents
 
 **Orchestrator Agent (Terminal 1):**
+
 ```
 Use the send_message tool:
 - from: "orchestrator"
@@ -24,6 +25,7 @@ Use the send_message tool:
 ### Step 2: Coder receives and works on the task
 
 **Coder Agent (Terminal 2):**
+
 ```
 Use the read_messages tool:
 - agent: "coder"
@@ -42,6 +44,7 @@ Use the send_message tool:
 ### Step 3: Reviewer checks the work
 
 **Reviewer Agent (Terminal 3):**
+
 ```
 Use the read_messages tool:
 - agent: "reviewer"
@@ -68,6 +71,7 @@ Use the send_message tool:
 ### Orchestrator delegates multiple independent tasks
 
 **Orchestrator:**
+
 ```
 # Send multiple messages
 send_message(from: "orchestrator", to: "frontend-dev", content: "Build user profile page")
@@ -84,6 +88,7 @@ read_messages(agent: "orchestrator")
 ### Agents report progress back to orchestrator
 
 **Any Agent:**
+
 ```
 send_message(
   from: "database-admin",
@@ -94,6 +99,7 @@ send_message(
 ```
 
 **Orchestrator checks all updates:**
+
 ```
 read_messages(agent: "orchestrator")
 # Shows all progress updates from various agents
@@ -102,23 +108,27 @@ read_messages(agent: "orchestrator")
 ## Scenario 4: Cleanup and Message Management
 
 ### List messages before cleanup
+
 ```
 list_messages()
 # Shows all message IDs and metadata
 ```
 
 ### Delete specific message
+
 ```
 delete_message(message_id: "orchestrator-coder-1699564800000")
 ```
 
 ### Clear messages for specific agent
+
 ```
 clear_messages(agent: "coder")
 # Removes all messages addressed to "coder"
 ```
 
 ### Clear all messages
+
 ```
 clear_messages()
 # Removes all messages from the system
