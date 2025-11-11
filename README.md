@@ -7,6 +7,7 @@ An MCP (Model Context Protocol) server that facilitates local communication betw
 ## Overview
 
 The Agent Communication System allows:
+
 - **Orchestration agents** to delegate tasks to specialized agents (coder, reviewer, tester, etc.)
 - **Specialized agents** to receive tasks and send back results
 - **All agents** to work collaboratively without requiring multiple terminal windows for manual message passing
@@ -76,12 +77,14 @@ Or if installed globally:
 Send a message from one agent to another.
 
 **Parameters:**
+
 - `from` (string, required): The identifier of the sending agent (e.g., "orchestrator", "coder", "reviewer")
 - `to` (string, required): The identifier of the receiving agent
 - `subject` (string, optional): Subject line for the message
 - `content` (string, required): The message content
 
 **Example:**
+
 ```
 send_message({
   from: "orchestrator",
@@ -96,9 +99,11 @@ send_message({
 Read all messages addressed to a specific agent.
 
 **Parameters:**
+
 - `agent` (string, required): The identifier of the agent to read messages for
 
 **Example:**
+
 ```
 read_messages({
   agent: "coder"
@@ -110,9 +115,11 @@ read_messages({
 List metadata for all messages in the system, optionally filtered by recipient.
 
 **Parameters:**
+
 - `agent` (string, optional): Filter messages by recipient agent
 
 **Example:**
+
 ```
 list_messages({
   agent: "reviewer"
@@ -124,9 +131,11 @@ list_messages({
 Delete a specific message by its ID.
 
 **Parameters:**
+
 - `message_id` (string, required): The ID of the message to delete
 
 **Example:**
+
 ```
 delete_message({
   message_id: "orchestrator-coder-1699564800000"
@@ -138,9 +147,11 @@ delete_message({
 Clear all messages for a specific agent or all messages in the system.
 
 **Parameters:**
+
 - `agent` (string, optional): Clear messages only for this agent. If not specified, clears all messages.
 
 **Example:**
+
 ```
 clear_messages({
   agent: "coder"
@@ -154,6 +165,7 @@ For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md]
 ### Quick Example: Orchestrator → Coder → Reviewer
 
 1. **Orchestrator** sends a task to the coder:
+
    ```
    send_message({
      from: "orchestrator",
@@ -164,11 +176,13 @@ For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md]
    ```
 
 2. **Coder** (in a different Claude instance) reads the message:
+
    ```
    read_messages({ agent: "coder" })
    ```
 
 3. **Coder** completes the work and sends it to the reviewer:
+
    ```
    send_message({
      from: "coder",
@@ -179,9 +193,10 @@ For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md]
    ```
 
 4. **Reviewer** reads and responds:
+
    ```
    read_messages({ agent: "reviewer" })
-   
+
    send_message({
      from: "reviewer",
      to: "orchestrator",
@@ -193,6 +208,7 @@ For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md]
 ### Example 2: Broadcast and Collect Responses
 
 1. **Orchestrator** sends tasks to multiple agents:
+
    ```
    send_message({ from: "orchestrator", to: "coder", content: "..." })
    send_message({ from: "orchestrator", to: "tester", content: "..." })
@@ -228,15 +244,157 @@ Each message file is named: `{from}-{to}-{timestamp}.json`
 npm run build
 ```
 
+### Code Quality
+
+The project uses ESLint and Prettier to maintain code quality and consistency.
+
+#### Linting
+
+```bash
+# Run ESLint to check for issues
+npm run lint
+
+# Automatically fix ESLint issues
+npm run lint:fix
+```
+
+#### Formatting
+
+```bash
+# Format all files with Prettier
+npm run format
+
+# Check formatting without making changes
+npm run format:check
+```
+
+#### Type Checking
+
+```bash
+# Run TypeScript compiler for type checking (without emitting files)
+npm run type-check
+```
+
+#### Pre-commit Hooks
+
+The project uses Husky and lint-staged to automatically run code quality checks before commits:
+
+- **Linting**: ESLint automatically fixes issues in staged TypeScript files
+- **Formatting**: Prettier formats all staged files
+- **Type Safety**: TypeScript strict mode enabled
+
+Configuration files:
+
+- `.prettierrc.json` - Prettier formatting rules
+- `eslint.config.js` - ESLint linting rules
+- `.husky/pre-commit` - Git pre-commit hook
+
+### CI/CD Pipeline
+
+The project uses GitHub Actions with a hybrid runner system that automatically selects between self-hosted and GitHub-hosted runners for optimal quota management.
+
+#### Runner Selection
+
+**Automatic (day-based)**:
+
+- Days 1-25: Self-hosted runner (fast feedback, no quota cost)
+- Days 26-31: GitHub-hosted runners (ubuntu-latest)
+- Resets automatically on the first of each month
+
+**Manual Override (commit message flags)**:
+
+```bash
+# Force self-hosted runner
+git commit -m "feat: Add feature [self-hosted]"
+
+# Force GitHub-hosted runner
+git commit -m "fix: Quick fix [github]"
+
+# Skip CI entirely
+git commit -m "docs: Update README [skip-ci]"
+```
+
+**Manual Dispatch**:
+
+- Go to Actions → Select workflow → Run workflow
+- Choose runner_mode: `auto` / `self-hosted` / `github` / `skip`
+
+#### CI Checks
+
+The CI pipeline runs the following checks on every push and pull request:
+
+1. **Linting** - ESLint checks for code quality issues
+2. **Formatting** - Prettier validates code formatting
+3. **Type Checking** - TypeScript compiler validates types
+4. **Testing** - Full test suite with coverage reporting
+5. **Build** - Verifies project builds successfully
+
+All checks must pass before merging pull requests.
+
+### Testing
+
+The project uses Jest for testing with TypeScript support via ts-jest.
+
+#### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run tests with coverage report
+npm run test:coverage
+```
+
+#### Test Structure
+
+```
+tests/
+├── helpers.ts           # Test utility functions
+├── index.test.ts        # Unit tests for core functionality
+├── integration.test.ts  # Integration tests for file operations
+└── server.test.ts       # Server initialization tests
+```
+
+#### Coverage
+
+Coverage reports are generated in the `coverage/` directory when running `npm run test:coverage`.
+
+**Note on Coverage Metrics**: The main `index.ts` file is a server entry point that runs as a standalone MCP process and cannot be directly unit tested through imports. The integration tests provide comprehensive functional coverage of all message handling operations (send, read, list, delete, clear). For improved coverage metrics in future iterations, consider refactoring the server logic into separate, importable modules.
+
+The test suite includes:
+
+- 43 comprehensive tests covering all MCP tool operations
+- Unit tests for message storage, filtering, and deletion
+- Integration tests for concurrent operations and error scenarios
+- Server initialization and configuration tests
+
 ### Project Structure
 
 ```
 agent-comm-system/
+├── .github/                # GitHub configuration
+│   └── workflows/          # GitHub Actions workflows
+│       └── ci.yml          # CI pipeline with hybrid runner system
 ├── src/
-│   └── index.ts          # Main MCP server implementation
-├── dist/                 # Compiled JavaScript output
-├── package.json
-├── tsconfig.json
+│   └── index.ts            # Main MCP server implementation
+├── tests/                  # Test files
+│   ├── helpers.ts          # Test utilities
+│   ├── index.test.ts       # Unit tests
+│   ├── integration.test.ts # Integration tests
+│   └── server.test.ts      # Server initialization tests
+├── .husky/                 # Git hooks
+│   └── pre-commit          # Pre-commit hook for linting/formatting
+├── dist/                   # Compiled JavaScript output
+├── coverage/               # Test coverage reports
+├── .prettierrc.json        # Prettier configuration
+├── .prettierignore         # Prettier ignore patterns
+├── eslint.config.js        # ESLint configuration
+├── jest.config.js          # Jest configuration
+├── tsconfig.json           # TypeScript configuration
+├── package.json            # Project dependencies and scripts
 └── README.md
 ```
 
@@ -248,4 +406,3 @@ agent-comm-system/
 ## License
 
 ISC
-
