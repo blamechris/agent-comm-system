@@ -289,6 +289,48 @@ Configuration files:
 - `eslint.config.js` - ESLint linting rules
 - `.husky/pre-commit` - Git pre-commit hook
 
+### CI/CD Pipeline
+
+The project uses GitHub Actions with a hybrid runner system that automatically selects between self-hosted and GitHub-hosted runners for optimal quota management.
+
+#### Runner Selection
+
+**Automatic (day-based)**:
+
+- Days 1-25: Self-hosted runner (fast feedback, no quota cost)
+- Days 26-31: GitHub-hosted runners (ubuntu-latest)
+- Resets automatically on the first of each month
+
+**Manual Override (commit message flags)**:
+
+```bash
+# Force self-hosted runner
+git commit -m "feat: Add feature [self-hosted]"
+
+# Force GitHub-hosted runner
+git commit -m "fix: Quick fix [github]"
+
+# Skip CI entirely
+git commit -m "docs: Update README [skip-ci]"
+```
+
+**Manual Dispatch**:
+
+- Go to Actions → Select workflow → Run workflow
+- Choose runner_mode: `auto` / `self-hosted` / `github` / `skip`
+
+#### CI Checks
+
+The CI pipeline runs the following checks on every push and pull request:
+
+1. **Linting** - ESLint checks for code quality issues
+2. **Formatting** - Prettier validates code formatting
+3. **Type Checking** - TypeScript compiler validates types
+4. **Testing** - Full test suite with coverage reporting
+5. **Build** - Verifies project builds successfully
+
+All checks must pass before merging pull requests.
+
 ### Testing
 
 The project uses Jest for testing with TypeScript support via ts-jest.
@@ -333,6 +375,9 @@ The test suite includes:
 
 ```
 agent-comm-system/
+├── .github/                # GitHub configuration
+│   └── workflows/          # GitHub Actions workflows
+│       └── ci.yml          # CI pipeline with hybrid runner system
 ├── src/
 │   └── index.ts            # Main MCP server implementation
 ├── tests/                  # Test files
