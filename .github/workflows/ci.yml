@@ -29,7 +29,8 @@ jobs:
         id: runner-logic
         run: |
           # Check for [skip-ci] in commit message
-          if [[ "${{ github.event.head_commit.message }}" == *"[skip-ci]"* ]]; then
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          if [[ "$COMMIT_MSG" == *"[skip-ci]"* ]] || [[ "${{ github.event.pull_request.title }}" == *"[skip-ci]"* ]]; then
             echo "should-skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi
@@ -48,13 +49,13 @@ jobs:
             exit 0
           fi
 
-          # Check commit message flags
-          if [[ "${{ github.event.head_commit.message }}" == *"[self-hosted]"* ]]; then
+          # Check commit message flags (for push events)
+          if [[ "$COMMIT_MSG" == *"[self-hosted]"* ]]; then
             echo "runner-type=self-hosted" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          if [[ "${{ github.event.head_commit.message }}" == *"[github]"* ]]; then
+          if [[ "$COMMIT_MSG" == *"[github]"* ]]; then
             echo "runner-type=github" >> $GITHUB_OUTPUT
             exit 0
           fi
