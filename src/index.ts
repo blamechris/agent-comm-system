@@ -779,9 +779,14 @@ class AgentCommServer {
   }
 }
 
-// Main execution
-const server = new AgentCommServer();
-server.run().catch((error) => {
-  console.error("Fatal error running server:", error);
-  process.exit(1);
-});
+// Export for testing
+export { AgentCommServer, LRUCache, type Message, type MessageMetadata, type MessageIndex };
+
+// Main execution (only run if this file is executed directly)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const server = new AgentCommServer();
+  server.run().catch((error) => {
+    console.error("Fatal error running server:", error);
+    process.exit(1);
+  });
+}
