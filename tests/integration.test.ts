@@ -169,18 +169,12 @@ describe("Agent Communication System - Integration Tests", () => {
 
       for (const file of files) {
         if (file.endsWith(".json")) {
-          const content = await fs.readFile(
-            path.join(storageDir, file),
-            "utf-8"
-          );
+          const content = await fs.readFile(path.join(storageDir, file), "utf-8");
           messages.push(JSON.parse(content));
         }
       }
 
-      messages.sort(
-        (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-      );
+      messages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
       expect(messages).toHaveLength(3);
       expect(new Date(messages[0]!.timestamp).getTime()).toBeLessThan(
@@ -225,10 +219,7 @@ describe("Agent Communication System - Integration Tests", () => {
 
       for (const file of files) {
         if (file.endsWith(".json")) {
-          const content = await fs.readFile(
-            path.join(storageDir, file),
-            "utf-8"
-          );
+          const content = await fs.readFile(path.join(storageDir, file), "utf-8");
           const message = JSON.parse(content);
           const id = file.replace(".json", "");
 
@@ -255,10 +246,7 @@ describe("Agent Communication System - Integration Tests", () => {
 
       for (const file of files) {
         if (file.endsWith(".json")) {
-          const content = await fs.readFile(
-            path.join(storageDir, file),
-            "utf-8"
-          );
+          const content = await fs.readFile(path.join(storageDir, file), "utf-8");
           const message = JSON.parse(content);
 
           if (message.to === "b") {
@@ -280,10 +268,7 @@ describe("Agent Communication System - Integration Tests", () => {
 
   describe("delete_message Integration", () => {
     it("should successfully delete existing message", async () => {
-      const messageId = await writeTestMessage(
-        storageDir,
-        createMockMessage()
-      );
+      const messageId = await writeTestMessage(storageDir, createMockMessage());
       const filePath = path.join(storageDir, `${messageId}.json`);
 
       // Verify file exists
@@ -305,21 +290,9 @@ describe("Agent Communication System - Integration Tests", () => {
 
   describe("clear_messages Integration", () => {
     beforeEach(async () => {
-      await writeTestMessage(
-        storageDir,
-        createMockMessage({ to: "coder" }),
-        "msg-coder-1"
-      );
-      await writeTestMessage(
-        storageDir,
-        createMockMessage({ to: "coder" }),
-        "msg-coder-2"
-      );
-      await writeTestMessage(
-        storageDir,
-        createMockMessage({ to: "reviewer" }),
-        "msg-reviewer-1"
-      );
+      await writeTestMessage(storageDir, createMockMessage({ to: "coder" }), "msg-coder-1");
+      await writeTestMessage(storageDir, createMockMessage({ to: "coder" }), "msg-coder-2");
+      await writeTestMessage(storageDir, createMockMessage({ to: "reviewer" }), "msg-reviewer-1");
     });
 
     it("should clear messages for specific agent", async () => {
@@ -329,10 +302,7 @@ describe("Agent Communication System - Integration Tests", () => {
 
       for (const file of files) {
         if (file.endsWith(".json")) {
-          const content = await fs.readFile(
-            path.join(storageDir, file),
-            "utf-8"
-          );
+          const content = await fs.readFile(path.join(storageDir, file), "utf-8");
           const message = JSON.parse(content);
 
           if (message.to === "coder") {
@@ -346,9 +316,7 @@ describe("Agent Communication System - Integration Tests", () => {
 
       // Verify remaining messages
       const remainingFiles = await fs.readdir(storageDir);
-      expect(remainingFiles.filter((f) => f.endsWith(".json"))).toHaveLength(
-        1
-      );
+      expect(remainingFiles.filter((f) => f.endsWith(".json"))).toHaveLength(1);
     });
 
     it("should clear all messages when no agent specified", async () => {
@@ -365,9 +333,7 @@ describe("Agent Communication System - Integration Tests", () => {
       expect(deletedCount).toBe(3);
 
       const remainingFiles = await fs.readdir(storageDir);
-      expect(remainingFiles.filter((f) => f.endsWith(".json"))).toHaveLength(
-        0
-      );
+      expect(remainingFiles.filter((f) => f.endsWith(".json"))).toHaveLength(0);
     });
   });
 
@@ -400,11 +366,7 @@ describe("Agent Communication System - Integration Tests", () => {
 
       // Concurrent read and write
       const readPromise = fs.readdir(storageDir);
-      const writePromise = writeTestMessage(
-        storageDir,
-        createMockMessage(),
-        "concurrent-3"
-      );
+      const writePromise = writeTestMessage(storageDir, createMockMessage(), "concurrent-3");
 
       await Promise.all([readPromise, writePromise]);
 

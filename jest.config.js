@@ -1,21 +1,13 @@
 /** @type {import('jest').Config} */
 export default {
-  preset: 'ts-jest/presets/default-esm',
-  testEnvironment: 'node',
-  roots: ['<rootDir>/src', '<rootDir>/tests'],
-  testMatch: ['**/__tests__/**/*.ts', '**/*.test.ts', '**/*.spec.ts'],
-  collectCoverageFrom: [
-    'src/**/*.ts',
-    '!src/**/*.d.ts',
-    '!src/**/__tests__/**',
-  ],
-  coverageDirectory: 'coverage',
-  coverageReporters: ['text', 'lcov', 'html'],
-  coveragePathIgnorePatterns: [
-    '/node_modules/',
-    '/tests/',
-    '/dist/',
-  ],
+  preset: "ts-jest/presets/default-esm",
+  testEnvironment: "node",
+  roots: ["<rootDir>/src", "<rootDir>/tests"],
+  testMatch: ["**/__tests__/**/*.ts", "**/*.test.ts", "**/*.spec.ts"],
+  collectCoverageFrom: ["src/**/*.ts", "!src/**/*.d.ts", "!src/**/__tests__/**"],
+  coverageDirectory: "coverage",
+  coverageReporters: ["text", "lcov", "html"],
+  coveragePathIgnorePatterns: ["/node_modules/", "/tests/", "/dist/"],
   // Note: Coverage thresholds are intentionally set to 0% because the main
   // index.ts file is a server entry point that runs as a standalone process
   // and cannot be easily unit tested. The integration tests in the tests/
@@ -31,12 +23,12 @@ export default {
     },
   },
   moduleNameMapper: {
-    '^(\\.{1,2}/.*)\\.js$': '$1',
+    "^(\\.{1,2}/.*)\\.js$": "$1",
   },
-  extensionsToTreatAsEsm: ['.ts'],
+  extensionsToTreatAsEsm: [".ts"],
   transform: {
-    '^.+\\.ts$': [
-      'ts-jest',
+    "^.+\\.ts$": [
+      "ts-jest",
       {
         useESM: true,
       },

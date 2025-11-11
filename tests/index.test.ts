@@ -97,9 +97,7 @@ describe("Agent Communication System", () => {
 
     it("should handle no messages for agent", async () => {
       const allMessages = await readAllTestMessages(testDir);
-      const nonExistentMessages = allMessages.filter(
-        (m) => m.to === "nonexistent"
-      );
+      const nonExistentMessages = allMessages.filter((m) => m.to === "nonexistent");
 
       expect(nonExistentMessages).toHaveLength(0);
     });
@@ -131,18 +129,9 @@ describe("Agent Communication System", () => {
 
   describe("Message Clearing", () => {
     beforeEach(async () => {
-      await writeTestMessage(
-        testDir,
-        createMockMessage({ from: "a", to: "coder" })
-      );
-      await writeTestMessage(
-        testDir,
-        createMockMessage({ from: "b", to: "coder" })
-      );
-      await writeTestMessage(
-        testDir,
-        createMockMessage({ from: "c", to: "reviewer" })
-      );
+      await writeTestMessage(testDir, createMockMessage({ from: "a", to: "coder" }));
+      await writeTestMessage(testDir, createMockMessage({ from: "b", to: "coder" }));
+      await writeTestMessage(testDir, createMockMessage({ from: "c", to: "reviewer" }));
     });
 
     it("should clear all messages for specific agent", async () => {
@@ -150,14 +139,11 @@ describe("Agent Communication System", () => {
       const coderMessages = allMessages.filter((m) => m.to === "coder");
 
       // Delete coder messages
-      for (const msg of coderMessages) {
+      for (const _msg of coderMessages) {
         const files = await fs.readdir(testDir);
         for (const file of files) {
           if (file.endsWith(".json")) {
-            const content = await fs.readFile(
-              path.join(testDir, file),
-              "utf-8"
-            );
+            const content = await fs.readFile(path.join(testDir, file), "utf-8");
             const fileMsg = JSON.parse(content);
             if (fileMsg.to === "coder") {
               await fs.unlink(path.join(testDir, file));
@@ -238,8 +224,7 @@ describe("Agent Communication System", () => {
 
       const messages = await readAllTestMessages(testDir);
       const sorted = messages.sort(
-        (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
       );
 
       expect(sorted).toHaveLength(3);

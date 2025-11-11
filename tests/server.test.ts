@@ -20,11 +20,7 @@ describe("AgentCommServer", () => {
 
   it("should initialize with default storage directory", () => {
     // Test that the default storage directory path is constructed correctly
-    const expectedDir = path.join(
-      os.homedir(),
-      ".agent-comm-system",
-      "messages"
-    );
+    const expectedDir = path.join(os.homedir(), ".agent-comm-system", "messages");
     expect(expectedDir).toContain(".agent-comm-system");
     expect(expectedDir).toContain("messages");
   });
@@ -149,13 +145,7 @@ describe("AgentCommServer", () => {
   });
 
   it("should support multiple agent types", () => {
-    const agents = new Set([
-      "orchestrator",
-      "coder",
-      "reviewer",
-      "tester",
-      "documenter",
-    ]);
+    const agents = new Set(["orchestrator", "coder", "reviewer", "tester", "documenter"]);
 
     expect(agents.size).toBe(5);
     expect(agents.has("orchestrator")).toBe(true);

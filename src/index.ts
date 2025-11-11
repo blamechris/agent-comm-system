@@ -44,12 +44,12 @@ class AgentCommServer {
     );
 
     this.setupToolHandlers();
-    
+
     // Error handling
     this.server.onerror = (error) => {
       console.error("[MCP Error]", error);
     };
-    
+
     process.on("SIGINT", async () => {
       await this.server.close();
       process.exit(0);
@@ -69,13 +69,15 @@ class AgentCommServer {
       const tools: Tool[] = [
         {
           name: "send_message",
-          description: "Send a message from one agent to another. Messages are stored as files and can be retrieved by the recipient agent.",
+          description:
+            "Send a message from one agent to another. Messages are stored as files and can be retrieved by the recipient agent.",
           inputSchema: {
             type: "object",
             properties: {
               from: {
                 type: "string",
-                description: "The identifier of the sending agent (e.g., 'orchestrator', 'coder', 'reviewer')",
+                description:
+                  "The identifier of the sending agent (e.g., 'orchestrator', 'coder', 'reviewer')",
               },
               to: {
                 type: "string",
@@ -95,7 +97,8 @@ class AgentCommServer {
         },
         {
           name: "read_messages",
-          description: "Read all messages addressed to a specific agent. Returns all unread messages.",
+          description:
+            "Read all messages addressed to a specific agent. Returns all unread messages.",
           inputSchema: {
             type: "object",
             properties: {
@@ -109,7 +112,8 @@ class AgentCommServer {
         },
         {
           name: "list_messages",
-          description: "List metadata for all messages in the system, optionally filtered by agent.",
+          description:
+            "List metadata for all messages in the system, optionally filtered by agent.",
           inputSchema: {
             type: "object",
             properties: {
@@ -142,7 +146,8 @@ class AgentCommServer {
             properties: {
               agent: {
                 type: "string",
-                description: "Optional: clear messages only for this agent. If not specified, clears all messages.",
+                description:
+                  "Optional: clear messages only for this agent. If not specified, clears all messages.",
               },
             },
           },
@@ -345,7 +350,7 @@ class AgentCommServer {
           },
         ],
       };
-    } catch (error) {
+    } catch (_error) {
       throw new Error(`Failed to delete message: ${message_id} not found`);
     }
   }
