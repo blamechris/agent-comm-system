@@ -213,6 +213,228 @@ clear_messages({
 
 ## Workflow Examples
 
+### 6. get_quota_status
+
+Get the message quota status for an agent, showing used, remaining, limit, and reset date.
+
+**Parameters:**
+
+- `agent` (string, required): The identifier of the agent to check quota for
+
+**Example:**
+
+```
+get_quota_status({
+  agent: "coder"
+})
+```
+
+**Response includes:**
+
+- Used messages count
+- Remaining messages count
+- Total limit
+- Percentage used
+- Reset date (if set)
+
+### 7. set_agent_quota
+
+Set a custom message quota for a specific agent (admin operation).
+
+**Parameters:**
+
+- `agent` (string, required): The identifier of the agent
+- `limit` (number, required): The maximum number of messages the agent can send
+
+**Example:**
+
+```
+set_agent_quota({
+  agent: "coder",
+  limit: 5000
+})
+```
+
+### 8. set_rate_limit
+
+Set custom rate limits for an agent or update default rate limits (admin operation).
+
+**Parameters:**
+
+- `agent` (string, optional): Agent identifier. If not specified, sets default limits for all agents.
+- `per_minute` (number, optional): Maximum messages per minute
+- `per_hour` (number, optional): Maximum messages per hour
+
+**Examples:**
+
+```
+// Set custom rate limits for specific agent
+set_rate_limit({
+  agent: "coder",
+  per_minute: 20,
+  per_hour: 200
+})
+
+// Set default rate limits for all agents
+set_rate_limit({
+  per_minute: 15,
+  per_hour: 150
+})
+```
+
+### 9. get_rate_limit_status
+
+Get the current rate limit status for an agent, showing current usage vs limits and when limits reset.
+
+**Parameters:**
+
+- `agent` (string, required): The identifier of the agent to check rate limits for
+
+**Example:**
+
+```
+get_rate_limit_status({
+  agent: "coder"
+})
+```
+
+**Response includes:**
+
+- Per-minute usage and limit
+- Per-hour usage and limit
+- Burst allowance
+- Time until reset for each window
+
+### 10. reset_agent_limits
+
+Reset rate limits and quota for an agent (admin operation).
+
+**Parameters:**
+
+- `agent` (string, required): The identifier of the agent to reset limits for
+
+**Example:**
+
+```
+reset_agent_limits({
+  agent: "coder"
+})
+```
+
+## Rate Limiting and Quotas
+
+The Agent Communication System includes comprehensive rate limiting and quota management to prevent abuse and manage resources effectively.
+
+### Default Limits
+
+- **Rate Limits:**
+  - 10 messages per agent per minute
+  - 100 messages per agent per hour
+  - +5 burst allowance for short spikes
+- **Quotas:**
+  - 10,000 total messages per agent (default)
+  - Tracking persists across server restarts
+
+### Features
+
+**Sliding Window Rate Limiter:**
+
+- Uses sliding window algorithm for accurate rate limiting
+- Separate windows for per-minute and per-hour tracking
+- Burst allowance (+5 messages) for handling short traffic spikes
+
+**Quota System:**
+
+- Track total message usage per agent
+- Customizable limits per agent
+- Percentage usage tracking
+- Optional reset dates
+
+**Throttling Behavior:**
+
+- Clear error messages when limits are exceeded
+- Includes retry-after timestamp in ISO format
+- Distinguishes between rate limit and quota violations
+
+**Configuration:**
+
+- Set custom rate limits per agent
+- Set custom quotas per agent
+- Update default limits for all new agents
+- Admin tools for resetting limits
+
+**Persistence:**
+
+- All limits and usage stored in `limits.json`
+- Asynchronous saves for performance
+- Graceful handling of server restarts
+- O(1) limit checking
+
+### Usage Examples
+
+**Check quota status:**
+
+```
+get_quota_status({ agent: "coder" })
+// Response:
+// Used: 150 messages
+// Remaining: 9850 messages
+// Limit: 10000 messages
+// Percentage Used: 1.5%
+```
+
+**Check rate limit status:**
+
+```
+get_rate_limit_status({ agent: "coder" })
+// Response:
+// --- Per Minute ---
+// Used: 3/10 (burst: +5)
+// Remaining: 12
+// Resets in: 45 seconds
+//
+// --- Per Hour ---
+// Used: 25/100
+// Remaining: 75
+// Resets in: 35 minutes
+```
+
+**Handle rate limit exceeded:**
+
+```
+send_message({
+  from: "coder",
+  to: "reviewer",
+  content: "..."
+})
+// Error: Rate limit exceeded: 10 messages per minute (burst: +5)
+// Retry after: 2025-11-12T14:35:20.000Z (11/12/2025, 2:35:20 PM)
+```
+
+**Set custom limits:**
+
+```
+// Increase limits for high-volume agent
+set_agent_quota({ agent: "orchestrator", limit: 50000 })
+set_rate_limit({ agent: "orchestrator", per_minute: 50, per_hour: 500 })
+
+// Restrict limits for low-priority agent
+set_agent_quota({ agent: "logger", limit: 1000 })
+set_rate_limit({ agent: "logger", per_minute: 5, per_hour: 50 })
+```
+
+**Reset limits after maintenance:**
+
+```
+reset_agent_limits({ agent: "coder" })
+// Response:
+// Limits reset for 'coder':
+// Rate limits: Cleared all usage windows
+// Quota: Reset to 0 used messages
+// Reset date: 2025-11-12T14:30:00.000Z
+```
+
+
 For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md](EXAMPLES.md).
 
 ### Quick Example: Orchestrator → Coder → Reviewer
