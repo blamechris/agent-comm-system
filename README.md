@@ -211,6 +211,154 @@ clear_messages({
 })
 ```
 
+## Message Threading
+
+Version 2.1 introduces powerful conversation threading features that allow you to organize related messages into threaded conversations.
+
+### How Threading Works
+
+- **Auto-generated Thread IDs**: Every new message automatically receives a unique thread ID
+- **Reply Tracking**: When you reply to a message using `reply_to`, your message inherits the parent's thread ID
+- **Deep Nesting**: Support for multi-level conversations (replies to replies)
+- **Thread Metadata**: Automatic tracking of participants, message count, and activity timestamps
+
+### Threading Tools
+
+### 6. get_thread
+
+Retrieve all messages in a conversation thread, sorted chronologically.
+
+**Parameters:**
+
+- `thread_id` (string, required): The unique identifier of the thread to retrieve
+
+**Example:**
+
+```
+get_thread({
+  thread_id: "a7f3e9c1-4b2d-4a8f-9e1c-5d6b7a8c9d0e"
+})
+```
+
+**Response includes:**
+
+- Thread status (active/closed)
+- List of participants
+- Message count
+- All messages in chronological order
+
+### 7. get_conversation_tree
+
+Display the hierarchical reply structure of a conversation thread.
+
+**Parameters:**
+
+- `thread_id` (string, required): The unique identifier of the thread to visualize
+
+**Example:**
+
+```
+get_conversation_tree({
+  thread_id: "a7f3e9c1-4b2d-4a8f-9e1c-5d6b7a8c9d0e"
+})
+```
+
+**Shows:**
+
+- Parent-child relationships between messages
+- Visual tree structure with indentation
+- Complete conversation hierarchy
+
+### 8. list_threads
+
+List all conversation threads with metadata. Supports filtering and pagination.
+
+**Parameters:**
+
+- `agent` (string, optional): Filter threads by participant agent
+- `status` (string, optional): Filter by "active" or "closed"
+- `limit` (number, optional): Maximum number of threads to return (default: 50)
+- `offset` (number, optional): Number of threads to skip (default: 0)
+
+**Examples:**
+
+```
+// List all active threads
+list_threads({
+  status: "active"
+})
+
+// List threads for a specific agent
+list_threads({
+  agent: "coder"
+})
+
+// Paginate through threads
+list_threads({
+  limit: 20,
+  offset: 20
+})
+```
+
+**Response includes:**
+
+- Thread ID
+- Status (active/closed)
+- First message subject
+- Participants
+- Message count
+- Last activity timestamp
+
+### 9. close_thread
+
+Mark a conversation thread as complete/closed.
+
+**Parameters:**
+
+- `thread_id` (string, required): The unique identifier of the thread to close
+
+**Example:**
+
+```
+close_thread({
+  thread_id: "a7f3e9c1-4b2d-4a8f-9e1c-5d6b7a8c9d0e"
+})
+```
+
+**Note:** Closed threads can still be viewed but are marked as inactive.
+
+### Updated send_message (with threading)
+
+The `send_message` tool now supports an optional `reply_to` parameter:
+
+**New Parameter:**
+
+- `reply_to` (string, optional): ID of the message to reply to. If provided, this message will be part of the same thread.
+
+**Example - Starting a new conversation:**
+
+```
+send_message({
+  from: "orchestrator",
+  to: "coder",
+  subject: "Implement login feature",
+  content: "Please implement a login page with authentication..."
+})
+// Returns: Thread ID: a7f3e9c1-4b2d-4a8f-9e1c-5d6b7a8c9d0e
+```
+
+**Example - Replying to a message:**
+
+```
+send_message({
+  from: "coder",
+  to: "orchestrator",
+  content: "Login feature completed. Ready for review.",
+  reply_to: "orchestrator-1699564800000"
+})
+// Automatically inherits the thread ID from the parent message
+```
+
 ## Workflow Examples
 
 For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md](EXAMPLES.md).
@@ -275,13 +423,14 @@ For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md]
 
 ## Message Storage
 
-### Directory Structure (v2.0)
+### Directory Structure (v2.1)
 
 Messages are organized by recipient agent in `~/.agent-comm-system/`:
 
 ```
 ~/.agent-comm-system/
 ├── index.json              # Message index for fast lookups
+├── thread_index.json       # Thread index for conversation tracking
 └── messages/
     ├── coder/              # Messages for 'coder' agent
     │   ├── orchestrator-1699564800000.json
@@ -295,6 +444,22 @@ Messages are organized by recipient agent in `~/.agent-comm-system/`:
 ### Message Format
 
 Each message is stored as a JSON file:
+
+**With threading (v2.1+):**
+
+```json
+{
+  "from": "orchestrator",
+  "to": "coder",
+  "timestamp": "2024-11-10T05:43:00.000Z",
+  "subject": "Task description",
+  "content": "Detailed message content...",
+  "thread_id": "a7f3e9c1-4b2d-4a8f-9e1c-5d6b7a8c9d0e",
+  "reply_to": "orchestrator-1699564700000"
+}
+```
+
+**Without threading (v1.0/v2.0, backward compatible):**
 
 ```json
 {
@@ -311,9 +476,9 @@ Each message is stored as a JSON file:
 - **v2.0 format**: `{from}-{timestamp}.json` (stored in `messages/{to}/` directory)
 - **v1.0 format**: `{from}-{to}-{timestamp}.json` (flat structure)
 
-### Index File
+### Index Files
 
-The `index.json` file maintains a fast lookup table:
+**Message Index (`index.json`)** - Fast lookup by agent:
 
 ```json
 {
@@ -323,7 +488,23 @@ The `index.json` file maintains a fast lookup table:
 }
 ```
 
-The index is automatically rebuilt on server startup if corrupted or missing.
+**Thread Index (`thread_index.json`)** - Conversation metadata:
+
+```json
+{
+  "a7f3e9c1-4b2d-4a8f-9e1c-5d6b7a8c9d0e": {
+    "thread_id": "a7f3e9c1-4b2d-4a8f-9e1c-5d6b7a8c9d0e",
+    "first_message_subject": "Implement login feature",
+    "message_count": 3,
+    "participants": ["orchestrator", "coder", "reviewer"],
+    "last_activity": "2024-11-10T06:00:00.000Z",
+    "status": "active",
+    "message_ids": ["orchestrator-1699564800000", "coder-1699564900000", "reviewer-1699565000000"]
+  }
+}
+```
+
+Both indexes are automatically rebuilt on server startup if corrupted or missing.
 
 ## Development
 
