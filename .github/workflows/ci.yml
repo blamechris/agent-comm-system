@@ -110,6 +110,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Normalize line endings
+        run: npm run format
+
       - name: Run ESLint
         run: npm run lint
 
@@ -138,6 +141,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Normalize line endings
+        run: npm run format
+
       - name: Run TypeScript type checking
         run: npm run type-check
 
@@ -162,6 +168,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Normalize line endings
+        run: npm run format
 
       - name: Run tests
         run: npm test
@@ -198,6 +207,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Normalize line endings
+        run: npm run format
 
       - name: Build project
         run: npm run build
