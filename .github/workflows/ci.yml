@@ -93,11 +93,13 @@ jobs:
     if: needs.determine-runner.outputs.should-skip != 'true'
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
+      - name: Configure Git line endings
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          # Force LF line endings on Windows
-          autocrlf: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -119,11 +121,13 @@ jobs:
     if: needs.determine-runner.outputs.should-skip != 'true'
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
+      - name: Configure Git line endings
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          # Force LF line endings on Windows
-          autocrlf: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -142,11 +146,13 @@ jobs:
     if: needs.determine-runner.outputs.should-skip != 'true'
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
+      - name: Configure Git line endings
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          # Force LF line endings on Windows
-          autocrlf: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -176,11 +182,13 @@ jobs:
     if: needs.determine-runner.outputs.should-skip != 'true'
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
+      - name: Configure Git line endings
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          # Force LF line endings on Windows
-          autocrlf: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
