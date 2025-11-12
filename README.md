@@ -434,7 +434,6 @@ reset_agent_limits({ agent: "coder" })
 // Reset date: 2025-11-12T14:30:00.000Z
 ```
 
-
 For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md](EXAMPLES.md).
 
 ### Quick Example: Orchestrator → Coder → Reviewer
