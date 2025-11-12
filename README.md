@@ -4,9 +4,21 @@ An MCP (Model Context Protocol) server that facilitates local communication betw
 
 📚 **[Quick Start Guide](QUICKSTART.md)** | 📖 **[Usage Examples](EXAMPLES.md)**
 
-## ⚡ What's New in v2.0.0
+## ⚡ What's New in v2.1.0
 
-Version 2.0 introduces significant performance and efficiency improvements:
+Version 2.1 adds a comprehensive message acknowledgment system:
+
+- **📬 Status Tracking**: Messages now have status (unread/read/acknowledged)
+- **✅ Mark as Read**: Explicitly mark messages as read with `mark_message_read` tool
+- **🎯 Mark as Acknowledged**: Mark messages as processed/acknowledged
+- **🔢 Unread Count**: Get count of unread messages with `get_unread_count` tool
+- **🔍 Status Filtering**: Filter messages by status in `read_messages`
+- **🔄 Auto-Mark Read**: Optionally mark messages as read when retrieving them
+- **🔙 Backward Compatible**: Existing messages without status are treated as "unread"
+
+## What's New in v2.0.0
+
+Version 2.0 introduced significant performance and efficiency improvements:
 
 - **🚀 Message Indexing**: O(1) message lookups instead of O(n) directory scans
 - **💾 LRU Caching**: In-memory cache for frequently accessed messages (reduces disk I/O by ~80%)
@@ -115,13 +127,15 @@ send_message({
 
 ### 2. read_messages
 
-Read messages addressed to a specific agent with optional pagination.
+Read messages addressed to a specific agent with optional pagination, status filtering, and auto-mark as read.
 
 **Parameters:**
 
 - `agent` (string, required): The identifier of the agent to read messages for
 - `limit` (number, optional): Maximum number of messages to return (default: 50)
 - `offset` (number, optional): Number of messages to skip (default: 0)
+- `status` (string, optional): Filter by status: "unread", "read", or "acknowledged"
+- `mark_as_read` (boolean, optional): Automatically mark returned messages as read (default: false)
 
 **Examples:**
 
@@ -131,25 +145,38 @@ read_messages({
   agent: "coder"
 })
 
+// Read only unread messages
+read_messages({
+  agent: "coder",
+  status: "unread"
+})
+
+// Read and automatically mark as read
+read_messages({
+  agent: "coder",
+  mark_as_read: true
+})
+
+// Read unread messages and mark them as read
+read_messages({
+  agent: "coder",
+  status: "unread",
+  mark_as_read: true
+})
+
 // Read next page of messages
 read_messages({
   agent: "coder",
   limit: 20,
   offset: 20
 })
-
-// Read first 100 messages
-read_messages({
-  agent: "coder",
-  limit: 100
-})
 ```
 
-**Response includes pagination metadata:**
+**Response includes:**
 
-- Total message count
-- Current offset and limit
-- Whether more messages are available
+- Message content with status field
+- Pagination metadata (total count, offset, limit, hasMore)
+- Status information for each message
 
 ### 3. list_messages
 
@@ -211,6 +238,58 @@ clear_messages({
 })
 ```
 
+### 6. mark_message_read
+
+Mark a specific message as read.
+
+**Parameters:**
+
+- `message_id` (string, required): The ID of the message to mark as read
+
+**Example:**
+
+```
+mark_message_read({
+  message_id: "orchestrator-1699564800000"
+})
+```
+
+### 7. mark_message_acknowledged
+
+Mark a specific message as acknowledged/processed.
+
+**Parameters:**
+
+- `message_id` (string, required): The ID of the message to mark as acknowledged
+
+**Example:**
+
+```
+mark_message_acknowledged({
+  message_id: "orchestrator-1699564800000"
+})
+```
+
+### 8. get_unread_count
+
+Get the count of unread messages for an agent.
+
+**Parameters:**
+
+- `agent` (string, required): The identifier of the agent to get unread count for
+
+**Example:**
+
+```
+get_unread_count({
+  agent: "coder"
+})
+```
+
+**Response:**
+
+Returns a message like "Agent coder has 3 unread messages" or "Agent coder has 0 unread messages".
+
 ## Workflow Examples
 
 For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md](EXAMPLES.md).
@@ -258,7 +337,42 @@ For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md]
    })
    ```
 
-### Example 2: Broadcast and Collect Responses
+### Example 2: Using Status Tracking
+
+1. **Coder** checks for unread messages:
+
+   ```
+   get_unread_count({ agent: "coder" })
+   // Returns: "Agent coder has 2 unread messages"
+   ```
+
+2. **Coder** reads unread messages and marks them as read:
+
+   ```
+   read_messages({
+     agent: "coder",
+     status: "unread",
+     mark_as_read: true
+   })
+   ```
+
+3. **Coder** processes a task and marks it as acknowledged:
+
+   ```
+   mark_message_acknowledged({
+     message_id: "orchestrator-1699564800000"
+   })
+   ```
+
+4. **Orchestrator** checks which messages have been processed:
+   ```
+   read_messages({
+     agent: "orchestrator",
+     status: "acknowledged"
+   })
+   ```
+
+### Example 3: Broadcast and Collect Responses
 
 1. **Orchestrator** sends tasks to multiple agents:
 
@@ -302,9 +416,18 @@ Each message is stored as a JSON file:
   "to": "coder",
   "timestamp": "2024-11-10T05:43:00.000Z",
   "subject": "Task description",
-  "content": "Detailed message content..."
+  "content": "Detailed message content...",
+  "status": "unread"
 }
 ```
+
+**Status field (v2.1+):**
+
+- `"unread"` - Default status when message is sent
+- `"read"` - Message has been read by recipient
+- `"acknowledged"` - Message has been processed/acknowledged
+
+Messages created before v2.1 without a status field are treated as "unread" for backward compatibility.
 
 ### File Naming
 
@@ -441,10 +564,12 @@ npm run test:coverage
 
 ```
 tests/
-├── helpers.ts           # Test utility functions
-├── index.test.ts        # Unit tests for core functionality
-├── integration.test.ts  # Integration tests for file operations
-└── server.test.ts       # Server initialization tests
+├── helpers.ts              # Test utility functions
+├── index.test.ts           # Unit tests for core functionality
+├── integration.test.ts     # Integration tests for file operations
+├── server.test.ts          # Server initialization tests
+├── v2.test.ts              # Tests for v2.0 features (caching, indexing, pagination)
+└── acknowledgment.test.ts  # Tests for v2.1 acknowledgment system
 ```
 
 #### Coverage
@@ -455,10 +580,11 @@ Coverage reports are generated in the `coverage/` directory when running `npm ru
 
 The test suite includes:
 
-- 43 comprehensive tests covering all MCP tool operations
+- 95 comprehensive tests covering all MCP tool operations
 - Unit tests for message storage, filtering, and deletion
 - Integration tests for concurrent operations and error scenarios
 - Server initialization and configuration tests
+- Acknowledgment system tests including status tracking, filtering, and backward compatibility
 
 ### Project Structure
 
@@ -469,11 +595,13 @@ agent-comm-system/
 │       └── ci.yml          # CI pipeline with hybrid runner system
 ├── src/
 │   └── index.ts            # Main MCP server implementation
-├── tests/                  # Test files
-│   ├── helpers.ts          # Test utilities
-│   ├── index.test.ts       # Unit tests
-│   ├── integration.test.ts # Integration tests
-│   └── server.test.ts      # Server initialization tests
+├── tests/                   # Test files
+│   ├── helpers.ts           # Test utilities
+│   ├── index.test.ts        # Unit tests
+│   ├── integration.test.ts  # Integration tests
+│   ├── server.test.ts       # Server initialization tests
+│   ├── v2.test.ts           # v2.0 feature tests
+│   └── acknowledgment.test.ts  # v2.1 acknowledgment tests
 ├── .husky/                 # Git hooks
 │   └── pre-commit          # Pre-commit hook for linting/formatting
 ├── dist/                   # Compiled JavaScript output

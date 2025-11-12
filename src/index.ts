@@ -22,6 +22,7 @@ interface MessageMetadata {
   to: string;
   timestamp: string;
   subject?: string;
+  status?: "unread" | "read" | "acknowledged";
 }
 
 interface Message extends MessageMetadata {
@@ -52,6 +53,8 @@ interface ReadMessagesArgs {
   agent?: string;
   limit?: number;
   offset?: number;
+  status?: "unread" | "read" | "acknowledged";
+  mark_as_read?: boolean;
 }
 
 interface ListMessagesArgs {
@@ -65,6 +68,18 @@ interface DeleteMessageArgs {
 }
 
 interface ClearMessagesArgs {
+  agent?: string;
+}
+
+interface MarkMessageReadArgs {
+  message_id?: string;
+}
+
+interface MarkMessageAcknowledgedArgs {
+  message_id?: string;
+}
+
+interface GetUnreadCountArgs {
   agent?: string;
 }
 
@@ -136,7 +151,7 @@ class AgentCommServer {
     this.server = new Server(
       {
         name: "agent-comm-system",
-        version: "2.0.0",
+        version: "2.1.0",
       },
       {
         capabilities: {
@@ -313,6 +328,16 @@ class AgentCommServer {
                 type: "number",
                 description: "Optional: Number of messages to skip (default: 0)",
               },
+              status: {
+                type: "string",
+                description: "Optional: Filter messages by status (unread, read, or acknowledged)",
+                enum: ["unread", "read", "acknowledged"],
+              },
+              mark_as_read: {
+                type: "boolean",
+                description:
+                  "Optional: Automatically mark returned messages as read (default: false)",
+              },
             },
             required: ["agent"],
           },
@@ -367,6 +392,48 @@ class AgentCommServer {
             },
           },
         },
+        {
+          name: "mark_message_read",
+          description: "Mark a specific message as read.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              message_id: {
+                type: "string",
+                description: "The ID of the message to mark as read",
+              },
+            },
+            required: ["message_id"],
+          },
+        },
+        {
+          name: "mark_message_acknowledged",
+          description: "Mark a specific message as acknowledged/processed.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              message_id: {
+                type: "string",
+                description: "The ID of the message to mark as acknowledged",
+              },
+            },
+            required: ["message_id"],
+          },
+        },
+        {
+          name: "get_unread_count",
+          description: "Get the count of unread messages for an agent.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              agent: {
+                type: "string",
+                description: "The identifier of the agent to get unread count for",
+              },
+            },
+            required: ["agent"],
+          },
+        },
       ];
 
       return { tools };
@@ -389,6 +456,12 @@ class AgentCommServer {
             return await this.handleDeleteMessage(args as DeleteMessageArgs);
           case "clear_messages":
             return await this.handleClearMessages(args as ClearMessagesArgs);
+          case "mark_message_read":
+            return await this.handleMarkMessageRead(args as MarkMessageReadArgs);
+          case "mark_message_acknowledged":
+            return await this.handleMarkMessageAcknowledged(args as MarkMessageAcknowledgedArgs);
+          case "get_unread_count":
+            return await this.handleGetUnreadCount(args as GetUnreadCountArgs);
           default:
             throw new Error(`Unknown tool: ${request.params.name}`);
         }
@@ -429,6 +502,7 @@ class AgentCommServer {
       timestamp,
       ...(subject && { subject }),
       content,
+      status: "unread",
     };
 
     await fs.writeFile(filePath, JSON.stringify(message, null, 2));
@@ -448,7 +522,7 @@ class AgentCommServer {
   }
 
   private async handleReadMessages(args: ReadMessagesArgs) {
-    const { agent, limit = DEFAULT_PAGE_LIMIT, offset = 0 } = args;
+    const { agent, limit = DEFAULT_PAGE_LIMIT, offset = 0, status, mark_as_read = false } = args;
 
     if (!agent) {
       throw new Error("Missing required parameter: agent");
@@ -469,7 +543,7 @@ class AgentCommServer {
     }
 
     // Load messages (using cache when possible)
-    const messages: Message[] = [];
+    const messages: Array<Message & { id: string }> = [];
     const agentDir = this.getAgentDir(agent);
 
     for (const messageId of messageIds) {
@@ -490,15 +564,23 @@ class AgentCommServer {
         }
       }
 
-      messages.push(message);
+      messages.push({ ...message, id: messageId });
+    }
+
+    // Filter by status if specified
+    let filteredMessages = messages;
+    if (status) {
+      filteredMessages = messages.filter((msg) => (msg.status || "unread") === status);
     }
 
     // Sort by timestamp
-    messages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    filteredMessages.sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
 
     // Apply pagination
-    const total = messages.length;
-    const paginatedMessages = messages.slice(offset, offset + limit);
+    const total = filteredMessages.length;
+    const paginatedMessages = filteredMessages.slice(offset, offset + limit);
     const pagination: PaginationMetadata = {
       total,
       offset,
@@ -518,9 +600,18 @@ class AgentCommServer {
       };
     }
 
+    // Mark messages as read if requested
+    if (mark_as_read) {
+      for (const msg of paginatedMessages) {
+        if ((msg.status || "unread") !== "read" && (msg.status || "unread") !== "acknowledged") {
+          await this.updateMessageStatus(msg.id, "read");
+        }
+      }
+    }
+
     const messageText = paginatedMessages
       .map((msg, idx) => {
-        return `\n--- Message ${offset + idx + 1} ---\nFrom: ${msg.from}\nTo: ${msg.to}\nTimestamp: ${msg.timestamp}${msg.subject ? `\nSubject: ${msg.subject}` : ""}\n\nContent:\n${msg.content}\n`;
+        return `\n--- Message ${offset + idx + 1} ---\nFrom: ${msg.from}\nTo: ${msg.to}\nTimestamp: ${msg.timestamp}${msg.subject ? `\nSubject: ${msg.subject}` : ""}\nStatus: ${msg.status || "unread"}\n\nContent:\n${msg.content}\n`;
       })
       .join("\n");
 
@@ -530,7 +621,7 @@ class AgentCommServer {
       content: [
         {
           type: "text",
-          text: `Found ${total} message(s) for ${agent}:${messageText}${paginationInfo}`,
+          text: `Found ${total} message(s) for ${agent}${status ? ` with status "${status}"` : ""}:${messageText}${paginationInfo}`,
         },
       ],
     };
@@ -568,6 +659,7 @@ class AgentCommServer {
           to: message.to,
           timestamp: message.timestamp,
           ...(message.subject && { subject: message.subject }),
+          status: message.status || "unread",
         });
       }
     } else {
@@ -641,7 +733,7 @@ class AgentCommServer {
 
     const listText = paginatedList
       .map((msg) => {
-        return `ID: ${msg.id}\n  From: ${msg.from} → To: ${msg.to}\n  Timestamp: ${msg.timestamp}${msg.subject ? `\n  Subject: ${msg.subject}` : ""}`;
+        return `ID: ${msg.id}\n  From: ${msg.from} → To: ${msg.to}\n  Timestamp: ${msg.timestamp}${msg.subject ? `\n  Subject: ${msg.subject}` : ""}\n  Status: ${msg.status || "unread"}`;
       })
       .join("\n\n");
 
@@ -769,12 +861,146 @@ class AgentCommServer {
     };
   }
 
+  /**
+   * Update the status of a message
+   */
+  private async updateMessageStatus(
+    messageId: string,
+    newStatus: "unread" | "read" | "acknowledged"
+  ): Promise<void> {
+    // Find which agent this message belongs to
+    let foundAgent: string | null = null;
+    for (const [agent, messageIds] of Object.entries(this.messageIndex)) {
+      if (messageIds.includes(messageId)) {
+        foundAgent = agent;
+        break;
+      }
+    }
+
+    if (!foundAgent) {
+      throw new Error(`Message ${messageId} not found`);
+    }
+
+    const agentDir = this.getAgentDir(foundAgent);
+    const filePath = path.join(agentDir, `${messageId}.json`);
+
+    // Read the message
+    const content = await fs.readFile(filePath, "utf-8");
+    const message = JSON.parse(content) as Message;
+
+    // Update status
+    message.status = newStatus;
+
+    // Write back to disk
+    await fs.writeFile(filePath, JSON.stringify(message, null, 2));
+
+    // Update cache
+    this.messageCache.set(messageId, message);
+  }
+
+  private async handleMarkMessageRead(args: MarkMessageReadArgs) {
+    const { message_id } = args;
+
+    if (!message_id) {
+      throw new Error("Missing required parameter: message_id");
+    }
+
+    await this.updateMessageStatus(message_id, "read");
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Message ${message_id} marked as read`,
+        },
+      ],
+    };
+  }
+
+  private async handleMarkMessageAcknowledged(args: MarkMessageAcknowledgedArgs) {
+    const { message_id } = args;
+
+    if (!message_id) {
+      throw new Error("Missing required parameter: message_id");
+    }
+
+    await this.updateMessageStatus(message_id, "acknowledged");
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Message ${message_id} marked as acknowledged`,
+        },
+      ],
+    };
+  }
+
+  private async handleGetUnreadCount(args: GetUnreadCountArgs) {
+    const { agent } = args;
+
+    if (!agent) {
+      throw new Error("Missing required parameter: agent");
+    }
+
+    // Use index to get message IDs for this agent
+    const messageIds = this.messageIndex[agent] || [];
+
+    if (messageIds.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Agent ${agent} has 0 unread messages`,
+          },
+        ],
+      };
+    }
+
+    // Count unread messages
+    let unreadCount = 0;
+    const agentDir = this.getAgentDir(agent);
+
+    for (const messageId of messageIds) {
+      // Check cache first
+      let message = this.messageCache.get(messageId);
+
+      if (!message) {
+        // Not in cache, load from disk
+        const filePath = path.join(agentDir, `${messageId}.json`);
+        try {
+          const content = await fs.readFile(filePath, "utf-8");
+          const parsedMessage = JSON.parse(content) as Message;
+          this.messageCache.set(messageId, parsedMessage);
+          message = parsedMessage;
+        } catch {
+          // File doesn't exist, skip it
+          continue;
+        }
+      }
+
+      // Treat messages without status field as unread (backward compatibility)
+      if (!message.status || message.status === "unread") {
+        unreadCount++;
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Agent ${agent} has ${unreadCount} unread message${unreadCount !== 1 ? "s" : ""}`,
+        },
+      ],
+    };
+  }
+
   async run() {
     await this.ensureStorageDir();
     await this.loadIndex();
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error("Agent Communication MCP Server v2.0.0 running on stdio");
+    console.error("Agent Communication MCP Server v2.1.0 running on stdio");
     console.error(`Loaded index with ${Object.keys(this.messageIndex).length} agent(s)`);
   }
 }
