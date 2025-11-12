@@ -94,6 +94,7 @@ jobs:
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - name: Configure Git line endings
+        shell: bash
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
@@ -125,6 +126,7 @@ jobs:
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - name: Configure Git line endings
+        shell: bash
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
@@ -153,6 +155,7 @@ jobs:
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - name: Configure Git line endings
+        shell: bash
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
@@ -192,6 +195,7 @@ jobs:
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - name: Configure Git line endings
+        shell: bash
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
@@ -215,6 +219,7 @@ jobs:
         run: npm run build
 
       - name: Verify build output
+        shell: bash
         run: |
           if [ ! -f "dist/index.js" ]; then
             echo "Build failed: dist/index.js not found"
