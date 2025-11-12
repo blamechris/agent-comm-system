@@ -25,6 +25,11 @@ jobs:
       should-skip: ${{ steps.runner-logic.outputs.should-skip }}
       runner-type: ${{ steps.runner-logic.outputs.runner-type }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 10  # Fetch recent commits to check messages
+
       - name: Determine runner
         id: runner-logic
         run: |
@@ -62,6 +67,24 @@ jobs:
             echo "Using manual runner selection: ${{ github.event.inputs.runner_mode }}"
             echo "runner-type=${{ github.event.inputs.runner_mode }}" >> $GITHUB_OUTPUT
             exit 0
+          fi
+
+          # For PR events, check recent commit messages
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "Checking recent commit messages for runner flags..."
+
+            # Check last 10 commits for [github] or [self-hosted] flags
+            if git log -10 --pretty=format:%s | grep -q "\[github\]"; then
+              echo "Found [github] flag in recent commits"
+              echo "runner-type=github" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            if git log -10 --pretty=format:%s | grep -q "\[self-hosted\]"; then
+              echo "Found [self-hosted] flag in recent commits"
+              echo "runner-type=self-hosted" >> $GITHUB_OUTPUT
+              exit 0
+            fi
           fi
 
           # Check commit message flags (for push events)
