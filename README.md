@@ -211,6 +211,175 @@ clear_messages({
 })
 ```
 
+## Statistics and Analytics
+
+The agent-comm-system now includes comprehensive statistics and analytics tools to track message patterns, storage usage, and communication networks.
+
+### 6. get_agent_stats
+
+Get statistics for a specific agent or system-wide metrics.
+
+**Parameters:**
+
+- `agent` (string, optional): Get stats for this specific agent. If omitted, returns system-wide statistics.
+
+**Examples:**
+
+```
+// Get stats for a specific agent
+get_agent_stats({
+  agent: "coder"
+})
+
+// Get system-wide statistics
+get_agent_stats()
+```
+
+**Returns:**
+
+For a specific agent:
+
+- Total messages sent and received
+- Average messages per day
+- Most active communication partners (top 5)
+- First and last message timestamps
+
+For system-wide:
+
+- Total messages and agents
+- Average messages per day across all agents
+- Most active agents (top 10)
+- Last metrics update timestamp
+
+### 7. get_storage_stats
+
+Display storage and cache performance metrics.
+
+**Parameters:**
+
+None
+
+**Example:**
+
+```
+get_storage_stats()
+```
+
+**Returns:**
+
+- Total storage size in KB
+- Total message count
+- Index file size
+- Per-agent storage breakdown (top 10 agents)
+- Cache performance:
+  - Cache hits and misses
+  - Hit rate percentage
+  - Current cache size vs capacity
+
+### 8. get_activity_stats
+
+Analyze temporal activity patterns with optional filtering.
+
+**Parameters:**
+
+- `start_date` (string, optional): Filter activity from this date (ISO format: YYYY-MM-DD)
+- `end_date` (string, optional): Filter activity until this date (ISO format: YYYY-MM-DD)
+- `agent` (string, optional): Filter activity for specific agent
+
+**Examples:**
+
+```
+// Get all activity
+get_activity_stats()
+
+// Filter by date range
+get_activity_stats({
+  start_date: "2024-11-01",
+  end_date: "2024-11-10"
+})
+
+// Filter by agent
+get_activity_stats({
+  agent: "coder"
+})
+
+// Combine filters
+get_activity_stats({
+  agent: "coder",
+  start_date: "2024-11-01"
+})
+```
+
+**Returns:**
+
+- Daily activity histogram
+- Peak activity day with message count
+- Hourly activity histogram (0-23 hours)
+- Peak activity hour with message count
+- Agent activity ranking (when not filtered by agent)
+
+### 9. get_communication_graph
+
+Visualize the agent communication network.
+
+**Parameters:**
+
+None
+
+**Example:**
+
+```
+get_communication_graph()
+```
+
+**Returns:**
+
+- Nodes: List of all agents with sent/received counts
+- Edges: Top 20 communication paths with message counts
+- Total unique communication paths
+- Visual representation of agent-to-agent message flows
+
+### Metrics Storage
+
+Statistics are automatically tracked and stored in `~/.agent-comm-system/metrics.json`:
+
+- **Incremental updates**: Metrics update on each message send (O(1) operation)
+- **Cache tracking**: Monitors cache hits and misses for performance insights
+- **Automatic rebuilding**: Metrics are rebuilt from message files if corrupted
+- **Persistent across restarts**: Statistics persist between server sessions
+
+The metrics file includes:
+
+```json
+{
+  "total_messages": 150,
+  "total_storage_bytes": 45678,
+  "cache_hits": 89,
+  "cache_misses": 23,
+  "agents": {
+    "coder": {
+      "sent_count": 45,
+      "received_count": 38,
+      "most_active_partners": {
+        "orchestrator": 30,
+        "reviewer": 15
+      },
+      "first_message": "2024-11-01T10:00:00.000Z",
+      "last_message": "2024-11-10T15:30:00.000Z"
+    }
+  },
+  "daily_activity": {
+    "2024-11-10": 25,
+    "2024-11-09": 18
+  },
+  "hourly_activity": {
+    "14": 15,
+    "15": 10
+  },
+  "last_updated": "2024-11-10T15:30:00.000Z"
+}
+```
+
 ## Workflow Examples
 
 For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md](EXAMPLES.md).
@@ -282,6 +451,7 @@ Messages are organized by recipient agent in `~/.agent-comm-system/`:
 ```
 ~/.agent-comm-system/
 ├── index.json              # Message index for fast lookups
+├── metrics.json            # Statistics and analytics data
 └── messages/
     ├── coder/              # Messages for 'coder' agent
     │   ├── orchestrator-1699564800000.json
@@ -444,7 +614,8 @@ tests/
 ├── helpers.ts           # Test utility functions
 ├── index.test.ts        # Unit tests for core functionality
 ├── integration.test.ts  # Integration tests for file operations
-└── server.test.ts       # Server initialization tests
+├── server.test.ts       # Server initialization tests
+└── statistics.test.ts   # Statistics and analytics tests
 ```
 
 #### Coverage
