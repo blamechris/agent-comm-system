@@ -25,17 +25,37 @@ jobs:
       should-skip: ${{ steps.runner-logic.outputs.should-skip }}
       runner-type: ${{ steps.runner-logic.outputs.runner-type }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 10  # Fetch recent commits to check messages
+
       - name: Determine runner
         id: runner-logic
         run: |
-          # Check for [skip-ci] in commit message
-          if [[ "${{ github.event.head_commit.message }}" == *"[skip-ci]"* ]]; then
+          echo "Event name: ${{ github.event_name }}"
+          echo "Commit message: ${{ github.event.head_commit.message }}"
+          echo "PR title: ${{ github.event.pull_request.title }}"
+
+          # Check for [skip-ci] in commit message or PR title
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+
+          if [[ -n "$COMMIT_MSG" && "$COMMIT_MSG" == *"[skip-ci]"* ]]; then
+            echo "Skipping CI due to [skip-ci] in commit message"
+            echo "should-skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if [[ -n "$PR_TITLE" && "$PR_TITLE" == *"[skip-ci]"* ]]; then
+            echo "Skipping CI due to [skip-ci] in PR title"
             echo "should-skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           # Manual override
           if [[ "${{ github.event.inputs.runner_mode }}" == "skip" ]]; then
+            echo "Skipping CI due to manual override"
             echo "should-skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi
@@ -44,26 +64,50 @@ jobs:
 
           # Check for manual runner selection
           if [[ "${{ github.event.inputs.runner_mode }}" != "" && "${{ github.event.inputs.runner_mode }}" != "auto" ]]; then
+            echo "Using manual runner selection: ${{ github.event.inputs.runner_mode }}"
             echo "runner-type=${{ github.event.inputs.runner_mode }}" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # Check commit message flags
-          if [[ "${{ github.event.head_commit.message }}" == *"[self-hosted]"* ]]; then
+          # For PR events, check recent commit messages
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "Checking recent commit messages for runner flags..."
+
+            # Check last 10 commits for [github] or [self-hosted] flags
+            if git log -10 --pretty=format:%s | grep -q "\[github\]"; then
+              echo "Found [github] flag in recent commits"
+              echo "runner-type=github" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            if git log -10 --pretty=format:%s | grep -q "\[self-hosted\]"; then
+              echo "Found [self-hosted] flag in recent commits"
+              echo "runner-type=self-hosted" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          # Check commit message flags (for push events)
+          if [[ -n "$COMMIT_MSG" && "$COMMIT_MSG" == *"[self-hosted]"* ]]; then
+            echo "Using self-hosted runner (from commit message)"
             echo "runner-type=self-hosted" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          if [[ "${{ github.event.head_commit.message }}" == *"[github]"* ]]; then
+          if [[ -n "$COMMIT_MSG" && "$COMMIT_MSG" == *"[github]"* ]]; then
+            echo "Using GitHub runner (from commit message)"
             echo "runner-type=github" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           # Auto-select based on day of month
           day=$(date +%d)
+          echo "Auto-selecting runner based on day: $day"
           if [ $day -le 25 ]; then
+            echo "Using self-hosted runner (day <= 25)"
             echo "runner-type=self-hosted" >> $GITHUB_OUTPUT
           else
+            echo "Using GitHub runner (day > 25)"
             echo "runner-type=github" >> $GITHUB_OUTPUT
           fi
 
@@ -72,6 +116,12 @@ jobs:
     if: needs.determine-runner.outputs.should-skip != 'true'
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
+      - name: Configure Git line endings
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -83,6 +133,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Normalize line endings
+        run: npm run format
 
       - name: Run ESLint
         run: npm run lint
@@ -95,6 +148,12 @@ jobs:
     if: needs.determine-runner.outputs.should-skip != 'true'
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
+      - name: Configure Git line endings
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -106,6 +165,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Normalize line endings
+        run: npm run format
 
       - name: Run TypeScript type checking
         run: npm run type-check
@@ -115,6 +177,12 @@ jobs:
     if: needs.determine-runner.outputs.should-skip != 'true'
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
+      - name: Configure Git line endings
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -126,6 +194,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Normalize line endings
+        run: npm run format
 
       - name: Run tests
         run: npm test
@@ -146,6 +217,12 @@ jobs:
     if: needs.determine-runner.outputs.should-skip != 'true'
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
+      - name: Configure Git line endings
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -158,10 +235,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Normalize line endings
+        run: npm run format
+
       - name: Build project
         run: npm run build
 
       - name: Verify build output
+        shell: bash
         run: |
           if [ ! -f "dist/index.js" ]; then
             echo "Build failed: dist/index.js not found"

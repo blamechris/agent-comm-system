@@ -5,3 +5,9 @@ coverage/
 .DS_Store
 .env
 .agent-comm-system/
+
+# Test build artifacts
+tests/*.js
+tests/*.d.ts
+tests/*.d.ts.map
+tests/*.js.map
