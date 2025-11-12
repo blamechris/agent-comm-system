@@ -242,10 +242,4 @@ jobs:
         run: npm run build
 
       - name: Verify build output
-        shell: bash
-        run: |
-          if [ ! -f "dist/index.js" ]; then
-            echo "Build failed: dist/index.js not found"
-            exit 1
-          fi
-          echo "Build successful: dist/index.js created"
+        run: node -e "const fs=require('fs'); if(!fs.existsSync('dist/index.js')){console.error('Build failed: dist/index.js not found');process.exit(1)}; console.log('Build successful: dist/index.js created')"
