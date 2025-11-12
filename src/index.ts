@@ -68,6 +68,35 @@ interface ClearMessagesArgs {
   agent?: string;
 }
 
+interface SendMessageBulkArgs {
+  from?: string;
+  to?: string[];
+  subject?: string;
+  content?: string;
+}
+
+interface DeleteMessagesBulkArgs {
+  message_ids?: string[];
+}
+
+interface UpdateMessageStatusBulkArgs {
+  message_ids?: string[];
+  status?: string;
+}
+
+interface DeleteMessagesByFilterArgs {
+  agent?: string;
+  from?: string;
+  before?: string;
+  after?: string;
+  status?: string;
+  confirm?: boolean;
+}
+
+interface MessageWithStatus extends Message {
+  status?: string;
+}
+
 /**
  * Simple LRU (Least Recently Used) Cache implementation
  */
@@ -263,6 +292,36 @@ class AgentCommServer {
     await this.saveIndex();
   }
 
+  /**
+   * Add multiple messages to the index in batch
+   * More efficient than multiple addToIndex calls
+   */
+  private batchAddToIndex(updates: Array<{ agent: string; messageId: string }>): void {
+    for (const { agent, messageId } of updates) {
+      if (!this.messageIndex[agent]) {
+        this.messageIndex[agent] = [];
+      }
+      this.messageIndex[agent].push(messageId);
+    }
+    // Note: Caller should call saveIndex() after this
+  }
+
+  /**
+   * Remove multiple messages from the index in batch
+   * More efficient than multiple removeFromIndex calls
+   */
+  private batchRemoveFromIndex(removals: Array<{ agent: string; messageId: string }>): void {
+    for (const { agent, messageId } of removals) {
+      if (this.messageIndex[agent]) {
+        this.messageIndex[agent] = this.messageIndex[agent].filter((id) => id !== messageId);
+        if (this.messageIndex[agent].length === 0) {
+          delete this.messageIndex[agent];
+        }
+      }
+    }
+    // Note: Caller should call saveIndex() after this
+  }
+
   private setupToolHandlers() {
     this.server.setRequestHandler(ListToolsRequestSchema, () => {
       const tools: Tool[] = [
@@ -367,6 +426,111 @@ class AgentCommServer {
             },
           },
         },
+        {
+          name: "send_message_bulk",
+          description:
+            "Send the same message to multiple recipients at once (broadcast). More efficient than sending individual messages.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              from: {
+                type: "string",
+                description: "The identifier of the sending agent",
+              },
+              to: {
+                type: "array",
+                items: {
+                  type: "string",
+                },
+                description: "Array of recipient agent identifiers",
+              },
+              subject: {
+                type: "string",
+                description: "Optional subject line for the message",
+              },
+              content: {
+                type: "string",
+                description: "The message content to send to all recipients",
+              },
+            },
+            required: ["from", "to", "content"],
+          },
+        },
+        {
+          name: "delete_messages_bulk",
+          description:
+            "Delete multiple messages by their IDs in a single operation. More efficient than deleting messages individually.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              message_ids: {
+                type: "array",
+                items: {
+                  type: "string",
+                },
+                description: "Array of message IDs to delete",
+              },
+            },
+            required: ["message_ids"],
+          },
+        },
+        {
+          name: "update_message_status_bulk",
+          description:
+            "Update the status for multiple messages at once. Useful for marking messages as read or acknowledged.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              message_ids: {
+                type: "array",
+                items: {
+                  type: "string",
+                },
+                description: "Array of message IDs to update",
+              },
+              status: {
+                type: "string",
+                description: 'Status to set (e.g., "read", "acknowledged")',
+              },
+            },
+            required: ["message_ids", "status"],
+          },
+        },
+        {
+          name: "delete_messages_by_filter",
+          description:
+            "Delete messages matching specific criteria. CAUTION: This can delete multiple messages at once. Requires confirmation.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              agent: {
+                type: "string",
+                description: "Optional: filter by recipient agent",
+              },
+              from: {
+                type: "string",
+                description: "Optional: filter by sender",
+              },
+              before: {
+                type: "string",
+                description: "Optional: ISO timestamp, delete messages before this date",
+              },
+              after: {
+                type: "string",
+                description: "Optional: ISO timestamp, delete messages after this date",
+              },
+              status: {
+                type: "string",
+                description: "Optional: filter by status",
+              },
+              confirm: {
+                type: "boolean",
+                description: "Must be set to true to confirm deletion",
+              },
+            },
+            required: ["confirm"],
+          },
+        },
       ];
 
       return { tools };
@@ -389,6 +553,14 @@ class AgentCommServer {
             return await this.handleDeleteMessage(args as DeleteMessageArgs);
           case "clear_messages":
             return await this.handleClearMessages(args as ClearMessagesArgs);
+          case "send_message_bulk":
+            return await this.handleSendMessageBulk(args as SendMessageBulkArgs);
+          case "delete_messages_bulk":
+            return await this.handleDeleteMessagesBulk(args as DeleteMessagesBulkArgs);
+          case "update_message_status_bulk":
+            return await this.handleUpdateMessageStatusBulk(args as UpdateMessageStatusBulkArgs);
+          case "delete_messages_by_filter":
+            return await this.handleDeleteMessagesByFilter(args as DeleteMessagesByFilterArgs);
           default:
             throw new Error(`Unknown tool: ${request.params.name}`);
         }
@@ -769,6 +941,324 @@ class AgentCommServer {
     };
   }
 
+  private async handleSendMessageBulk(args: SendMessageBulkArgs) {
+    const { from, to, subject, content } = args;
+
+    if (!from || !to || !content) {
+      throw new Error("Missing required parameters: from, to, and content are required");
+    }
+
+    if (!Array.isArray(to) || to.length === 0) {
+      throw new Error("Parameter 'to' must be a non-empty array of recipient agents");
+    }
+
+    const timestamp = new Date().toISOString();
+    const results: Array<{
+      to: string;
+      success: boolean;
+      message_id?: string;
+      error?: string;
+    }> = [];
+    const indexUpdates: Array<{ agent: string; messageId: string }> = [];
+
+    for (const recipient of to) {
+      try {
+        const messageId = `${from}-${Date.now()}`;
+        const fileName = `${messageId}.json`;
+
+        // Ensure agent directory exists
+        const agentDir = this.getAgentDir(recipient);
+        await fs.mkdir(agentDir, { recursive: true });
+
+        const filePath = path.join(agentDir, fileName);
+
+        const message: Message = {
+          from,
+          to: recipient,
+          timestamp,
+          ...(subject && { subject }),
+          content,
+        };
+
+        await fs.writeFile(filePath, JSON.stringify(message, null, 2));
+
+        // Collect index updates (batch later)
+        indexUpdates.push({ agent: recipient, messageId });
+
+        // Update cache
+        this.messageCache.set(messageId, message);
+
+        results.push({
+          to: recipient,
+          success: true,
+          message_id: messageId,
+        });
+
+        // Small delay to ensure unique timestamps
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      } catch (error) {
+        results.push({
+          to: recipient,
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to send message",
+        });
+      }
+    }
+
+    // Batch update index (single write operation)
+    if (indexUpdates.length > 0) {
+      this.batchAddToIndex(indexUpdates);
+      await this.saveIndex();
+    }
+
+    const successCount = results.filter((r) => r.success).length;
+    const failCount = results.length - successCount;
+
+    const summaryText = `Bulk send completed!\nTotal: ${results.length}\nSuccessful: ${successCount}\nFailed: ${failCount}\n\nResults:\n${results
+      .map(
+        (r) =>
+          `- ${r.to}: ${r.success ? `✓ Success (ID: ${r.message_id})` : `✗ Failed (${r.error})`}`
+      )
+      .join("\n")}`;
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: summaryText,
+        },
+      ],
+    };
+  }
+
+  private async handleDeleteMessagesBulk(args: DeleteMessagesBulkArgs) {
+    const { message_ids } = args;
+
+    if (!message_ids || !Array.isArray(message_ids) || message_ids.length === 0) {
+      throw new Error("Parameter 'message_ids' must be a non-empty array");
+    }
+
+    let deletedCount = 0;
+    const errors: string[] = [];
+    const indexRemovals: Array<{ agent: string; messageId: string }> = [];
+
+    for (const messageId of message_ids) {
+      try {
+        // Find which agent this message belongs to
+        let foundAgent: string | null = null;
+        for (const [agent, ids] of Object.entries(this.messageIndex)) {
+          if (ids.includes(messageId)) {
+            foundAgent = agent;
+            break;
+          }
+        }
+
+        if (!foundAgent) {
+          errors.push(`${messageId}: not found in index`);
+          continue;
+        }
+
+        const fileName = `${messageId}.json`;
+        const agentDir = this.getAgentDir(foundAgent);
+        const filePath = path.join(agentDir, fileName);
+
+        await fs.unlink(filePath);
+
+        // Collect index removals (batch later)
+        indexRemovals.push({ agent: foundAgent, messageId });
+
+        // Remove from cache
+        this.messageCache.delete(messageId);
+
+        deletedCount++;
+      } catch (error) {
+        errors.push(`${messageId}: ${error instanceof Error ? error.message : "deletion failed"}`);
+      }
+    }
+
+    // Batch update index (single write operation)
+    if (indexRemovals.length > 0) {
+      this.batchRemoveFromIndex(indexRemovals);
+      await this.saveIndex();
+    }
+
+    const resultText = `Bulk delete completed!\nRequested: ${message_ids.length}\nDeleted: ${deletedCount}\nFailed: ${errors.length}${
+      errors.length > 0 ? `\n\nErrors:\n${errors.join("\n")}` : ""
+    }`;
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: resultText,
+        },
+      ],
+    };
+  }
+
+  private async handleUpdateMessageStatusBulk(args: UpdateMessageStatusBulkArgs) {
+    const { message_ids, status } = args;
+
+    if (!message_ids || !Array.isArray(message_ids) || message_ids.length === 0) {
+      throw new Error("Parameter 'message_ids' must be a non-empty array");
+    }
+
+    if (!status) {
+      throw new Error("Missing required parameter: status");
+    }
+
+    let updatedCount = 0;
+    const errors: string[] = [];
+
+    for (const messageId of message_ids) {
+      try {
+        // Find which agent this message belongs to
+        let foundAgent: string | null = null;
+        for (const [agent, ids] of Object.entries(this.messageIndex)) {
+          if (ids.includes(messageId)) {
+            foundAgent = agent;
+            break;
+          }
+        }
+
+        if (!foundAgent) {
+          errors.push(`${messageId}: not found in index`);
+          continue;
+        }
+
+        const fileName = `${messageId}.json`;
+        const agentDir = this.getAgentDir(foundAgent);
+        const filePath = path.join(agentDir, fileName);
+
+        // Read the message
+        const content = await fs.readFile(filePath, "utf-8");
+        const message = JSON.parse(content) as MessageWithStatus;
+
+        // Update status
+        message.status = status;
+
+        // Write back
+        await fs.writeFile(filePath, JSON.stringify(message, null, 2));
+
+        // Update cache
+        this.messageCache.set(messageId, message);
+
+        updatedCount++;
+      } catch (error) {
+        errors.push(`${messageId}: ${error instanceof Error ? error.message : "update failed"}`);
+      }
+    }
+
+    const resultText = `Bulk status update completed!\nRequested: ${message_ids.length}\nUpdated: ${updatedCount}\nFailed: ${errors.length}\nStatus: ${status}${
+      errors.length > 0 ? `\n\nErrors:\n${errors.join("\n")}` : ""
+    }`;
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: resultText,
+        },
+      ],
+    };
+  }
+
+  private async handleDeleteMessagesByFilter(args: DeleteMessagesByFilterArgs) {
+    const { agent, from, before, after, status, confirm } = args;
+
+    if (!confirm) {
+      throw new Error("Confirmation required. Set confirm: true to proceed with deletion.");
+    }
+
+    // Collect all messages that match the filter
+    const messagesToDelete: Array<{ agent: string; messageId: string }> = [];
+
+    // Determine which agents to check
+    const agentsToCheck = agent ? [agent] : Object.keys(this.messageIndex);
+
+    for (const agentName of agentsToCheck) {
+      const messageIds = this.messageIndex[agentName] || [];
+      const agentDir = this.getAgentDir(agentName);
+
+      for (const messageId of messageIds) {
+        try {
+          // Load message (check cache first)
+          let message = this.messageCache.get(messageId) as MessageWithStatus | undefined;
+
+          if (!message) {
+            const filePath = path.join(agentDir, `${messageId}.json`);
+            const content = await fs.readFile(filePath, "utf-8");
+            message = JSON.parse(content) as MessageWithStatus;
+          }
+
+          // Apply filters
+          let matches = true;
+
+          if (from && message.from !== from) {
+            matches = false;
+          }
+
+          if (before && new Date(message.timestamp) >= new Date(before)) {
+            matches = false;
+          }
+
+          if (after && new Date(message.timestamp) <= new Date(after)) {
+            matches = false;
+          }
+
+          if (status && message.status !== status) {
+            matches = false;
+          }
+
+          if (matches) {
+            messagesToDelete.push({ agent: agentName, messageId });
+          }
+        } catch {
+          // Skip messages that can't be read
+          continue;
+        }
+      }
+    }
+
+    // Delete the matching messages
+    let deletedCount = 0;
+    for (const { agent: agentName, messageId } of messagesToDelete) {
+      try {
+        const agentDir = this.getAgentDir(agentName);
+        const filePath = path.join(agentDir, `${messageId}.json`);
+        await fs.unlink(filePath);
+        this.messageCache.delete(messageId);
+        deletedCount++;
+      } catch {
+        // Skip if delete fails
+      }
+    }
+
+    // Batch update index
+    if (messagesToDelete.length > 0) {
+      this.batchRemoveFromIndex(messagesToDelete);
+      await this.saveIndex();
+    }
+
+    const filterDescription = [];
+    if (agent) filterDescription.push(`agent: ${agent}`);
+    if (from) filterDescription.push(`from: ${from}`);
+    if (before) filterDescription.push(`before: ${before}`);
+    if (after) filterDescription.push(`after: ${after}`);
+    if (status) filterDescription.push(`status: ${status}`);
+
+    const resultText = `Bulk delete by filter completed!\nFilters: ${filterDescription.join(", ") || "none (all messages)"}\nMatched: ${messagesToDelete.length}\nDeleted: ${deletedCount}`;
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: resultText,
+        },
+      ],
+    };
+  }
+
   async run() {
     await this.ensureStorageDir();
     await this.loadIndex();
@@ -780,7 +1270,14 @@ class AgentCommServer {
 }
 
 // Export for testing
-export { AgentCommServer, LRUCache, type Message, type MessageMetadata, type MessageIndex };
+export {
+  AgentCommServer,
+  LRUCache,
+  type Message,
+  type MessageMetadata,
+  type MessageIndex,
+  type MessageWithStatus,
+};
 
 // Main execution (only run if this file is executed directly)
 if (import.meta.url === `file://${process.argv[1]}`) {

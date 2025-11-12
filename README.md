@@ -211,6 +211,163 @@ clear_messages({
 })
 ```
 
+## Bulk Operations
+
+Version 2.1 introduces bulk operations for efficient multi-message handling. These operations are optimized to update the index once per batch instead of per-message, significantly improving performance.
+
+### 6. send_message_bulk
+
+Send the same message to multiple recipients at once (broadcast). More efficient than sending individual messages.
+
+**Parameters:**
+
+- `from` (string, required): The identifier of the sending agent
+- `to` (array of strings, required): Array of recipient agent identifiers
+- `subject` (string, optional): Subject line for the message
+- `content` (string, required): The message content to send to all recipients
+
+**Example:**
+
+```
+send_message_bulk({
+  from: "orchestrator",
+  to: ["coder", "reviewer", "tester"],
+  subject: "Sprint Planning",
+  content: "Please review the sprint plan and provide feedback by EOD."
+})
+```
+
+**Response format:**
+
+```
+Bulk send completed!
+Total: 3
+Successful: 3
+Failed: 0
+
+Results:
+- coder: ✓ Success (ID: orchestrator-1699564800000)
+- reviewer: ✓ Success (ID: orchestrator-1699564801000)
+- tester: ✓ Success (ID: orchestrator-1699564802000)
+```
+
+**Performance benefit:** Single index update instead of N updates for N recipients.
+
+### 7. delete_messages_bulk
+
+Delete multiple messages by their IDs in a single operation. More efficient than deleting messages individually.
+
+**Parameters:**
+
+- `message_ids` (array of strings, required): Array of message IDs to delete
+
+**Example:**
+
+```
+delete_messages_bulk({
+  message_ids: [
+    "orchestrator-1699564800000",
+    "orchestrator-1699564801000",
+    "reviewer-1699564900000"
+  ]
+})
+```
+
+**Response format:**
+
+```
+Bulk delete completed!
+Requested: 3
+Deleted: 3
+Failed: 0
+```
+
+**Performance benefit:** Single index update instead of N updates for N deletions.
+
+### 8. update_message_status_bulk
+
+Update the status for multiple messages at once. Useful for marking messages as read or acknowledged.
+
+**Parameters:**
+
+- `message_ids` (array of strings, required): Array of message IDs to update
+- `status` (string, required): Status to set (e.g., "read", "acknowledged", "archived")
+
+**Example:**
+
+```
+update_message_status_bulk({
+  message_ids: [
+    "orchestrator-1699564800000",
+    "orchestrator-1699564801000"
+  ],
+  status: "read"
+})
+```
+
+**Response format:**
+
+```
+Bulk status update completed!
+Requested: 2
+Updated: 2
+Failed: 0
+Status: read
+```
+
+**Performance benefit:** Efficient batch processing with cache updates.
+
+### 9. delete_messages_by_filter
+
+Delete messages matching specific criteria. **CAUTION:** This can delete multiple messages at once and requires explicit confirmation.
+
+**Parameters:**
+
+- `agent` (string, optional): Filter by recipient agent
+- `from` (string, optional): Filter by sender
+- `before` (string, optional): ISO timestamp, delete messages before this date
+- `after` (string, optional): ISO timestamp, delete messages after this date
+- `status` (string, optional): Filter by status
+- `confirm` (boolean, required): Must be set to `true` to confirm deletion
+
+**Examples:**
+
+```
+// Delete all old messages for a specific agent
+delete_messages_by_filter({
+  agent: "coder",
+  before: "2024-01-01T00:00:00.000Z",
+  confirm: true
+})
+
+// Delete all read messages from orchestrator
+delete_messages_by_filter({
+  from: "orchestrator",
+  status: "read",
+  confirm: true
+})
+
+// Delete messages in a date range
+delete_messages_by_filter({
+  after: "2024-01-01T00:00:00.000Z",
+  before: "2024-02-01T00:00:00.000Z",
+  confirm: true
+})
+```
+
+**Response format:**
+
+```
+Bulk delete by filter completed!
+Filters: agent: coder, before: 2024-01-01T00:00:00.000Z
+Matched: 15
+Deleted: 15
+```
+
+**Safety:** The operation requires `confirm: true` to prevent accidental deletion. If `confirm` is not set or is `false`, the operation will fail with an error message.
+
+**Performance benefit:** Single index update for all matching messages, efficient filtering using cache when available.
+
 ## Workflow Examples
 
 For detailed usage examples and multi-agent workflow patterns, see [EXAMPLES.md](EXAMPLES.md).
@@ -455,9 +612,10 @@ Coverage reports are generated in the `coverage/` directory when running `npm ru
 
 The test suite includes:
 
-- 43 comprehensive tests covering all MCP tool operations
+- 100+ comprehensive tests covering all MCP tool operations
 - Unit tests for message storage, filtering, and deletion
 - Integration tests for concurrent operations and error scenarios
+- Bulk operation tests for performance and correctness
 - Server initialization and configuration tests
 
 ### Project Structure
