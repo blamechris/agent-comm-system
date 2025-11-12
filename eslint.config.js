@@ -5,7 +5,7 @@ import prettier from "eslint-plugin-prettier/recommended";
 export default tseslint.config(
   // Ignore patterns
   {
-    ignores: ["dist/**", "coverage/**", "node_modules/**"],
+    ignores: ["dist/**", "coverage/**", "node_modules/**", "tests/**/*.js", "tests/**/*.d.ts"],
   },
 
   // Base ESLint recommended rules for all files
