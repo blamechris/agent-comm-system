@@ -1,0 +1,187 @@
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -10,12 +10,18 @@ import {
+ import * as fs from "fs/promises";
+ import * as path from "path";
+ import * as os from "os";
++import { randomUUID } from "crypto";
+
+ // Default storage directory
+ const DEFAULT_STORAGE_DIR = path.join(os.homedir(), ".agent-comm-system", "messages");
+ const INDEX_FILE = "index.json";
+ const METRICS_FILE = "metrics.json";
+ const DEFAULT_CACHE_SIZE = 100;
+ const DEFAULT_PAGE_LIMIT = 50;
++
++// Storage limits (configurable via environment variables)
++const MAX_MESSAGE_SIZE = parseInt(process.env.MAX_MESSAGE_SIZE || "1048576"); // 1 MB default
++const MAX_TOTAL_STORAGE = parseInt(process.env.MAX_TOTAL_STORAGE || "1073741824"); // 1 GB default
++const MAX_SUBJECT_LENGTH = parseInt(process.env.MAX_SUBJECT_LENGTH || "500"); // 500 characters default
+
+ interface MessageMetadata {
+   from: string;
+@@ -545,6 +551,46 @@ class AgentCommServer {
+     this.saveMetrics().catch((error) => console.error("[Metrics Save Error]", error));
+   }
+
++  /**
++   * Validate message size and storage limits
++   */
++  private async validateMessageLimits(
++    content: string,
++    subject?: string
++  ): Promise<void> {
++    // Calculate message size (JSON representation)
++    const messageSize = Buffer.byteLength(content, "utf-8") +
++                        (subject ? Buffer.byteLength(subject, "utf-8") : 0);
++
++    // Check individual message size
++    if (messageSize > MAX_MESSAGE_SIZE) {
++      throw new Error(
++        `Message exceeds maximum size of ${MAX_MESSAGE_SIZE} bytes (${Math.ceil(MAX_MESSAGE_SIZE / 1024)} KB). ` +
++        `Your message is ${messageSize} bytes (${Math.ceil(messageSize / 1024)} KB).`
++      );
++    }
++
++    // Check subject length
++    if (subject && subject.length > MAX_SUBJECT_LENGTH) {
++      throw new Error(
++        `Subject exceeds maximum length of ${MAX_SUBJECT_LENGTH} characters. ` +
++        `Your subject is ${subject.length} characters.`
++      );
++    }
++
++    // Check total storage limit
++    if (this.metrics.total_storage_bytes + messageSize > MAX_TOTAL_STORAGE) {
++      const usedGB = (this.metrics.total_storage_bytes / (1024 * 1024 * 1024)).toFixed(2);
++      const maxGB = (MAX_TOTAL_STORAGE / (1024 * 1024 * 1024)).toFixed(2);
++      throw new Error(
++        `Storage limit exceeded. Maximum ${maxGB} GB allowed. ` +
++        `Currently using ${usedGB} GB. Please delete old messages to free space.`
++      );
++    }
++  }
++
+   /**
+    * Calculate storage size efficiently
+    */
+@@ -784,7 +830,10 @@ class AgentCommServer {
+     }
+
+     const timestamp = new Date().toISOString();
+-    const messageId = `${from}-${Date.now()}`;
++    const timestampNum = Date.now();
++    const uniqueSuffix = randomUUID().split("-")[0]; // First 8 chars of UUID
++    const messageId = `${from}-${timestampNum}-${uniqueSuffix}`;
++    // Example: "orchestrator-1699564800000-a3f5c8d2"
+     const fileName = `${messageId}.json`;
+
+     // Ensure agent directory exists
+@@ -799,10 +848,18 @@ class AgentCommServer {
+       ...(subject && { subject }),
+       content,
+     };
++
++    // Validate message limits
++    await this.validateMessageLimits(content, subject);
+
+     await fs.writeFile(filePath, JSON.stringify(message, null, 2));
+
++    // Update storage metrics
++    const fileStats = await fs.stat(filePath);
++    this.metrics.total_storage_bytes += fileStats.size;
++
+     // Update index and cache
+     await this.addToIndex(to, messageId);
+     this.messageCache.set(messageId, message);
+@@ -1053,8 +1110,20 @@ class AgentCommServer {
+     const filePath = path.join(agentDir, fileName);
+
+     try {
++      // Get file size before deleting
++      let fileSize = 0;
++      try {
++        const stats = await fs.stat(filePath);
++        fileSize = stats.size;
++      } catch {
++        // File doesn't exist or can't stat
++      }
++
+       await fs.unlink(filePath);
+       await this.removeFromIndex(foundAgent, message_id);
+       this.messageCache.delete(message_id);
++
++      // Update storage metrics
++      if (fileSize > 0) {
++        this.metrics.total_storage_bytes = Math.max(0, this.metrics.total_storage_bytes - fileSize);
++        this.saveMetrics().catch((error) => console.error("[Metrics Update Error]", error));
++      }
+
+       return {
+         content: [
+@@ -1073,6 +1142,7 @@ class AgentCommServer {
+   private async handleClearMessages(args: ClearMessagesArgs) {
+     const { agent } = args;
+     let deletedCount = 0;
++    let deletedBytes = 0;
+
+     if (agent) {
+       // Clear messages for specific agent
+@@ -1081,6 +1151,14 @@ class AgentCommServer {
+
+       for (const messageId of messageIds) {
+         const filePath = path.join(agentDir, `${messageId}.json`);
+         try {
++          // Get file size before deleting
++          try {
++            const stats = await fs.stat(filePath);
++            deletedBytes += stats.size;
++          } catch {
++            // Can't stat file
++          }
++
+           await fs.unlink(filePath);
+           this.messageCache.delete(messageId);
+           deletedCount++;
+@@ -1091,6 +1169,13 @@ class AgentCommServer {
+
+       await this.clearAgentFromIndex(agent);
+
++      // Update storage metrics
++      if (deletedBytes > 0) {
++        this.metrics.total_storage_bytes = Math.max(0, this.metrics.total_storage_bytes - deletedBytes);
++        await this.saveMetrics();
++      }
++
+       // Try to remove the agent directory if it's empty
+       try {
+         await fs.rmdir(agentDir);
+@@ -1104,6 +1189,14 @@ class AgentCommServer {
+
+         for (const messageId of messageIds) {
+           const filePath = path.join(agentDir, `${messageId}.json`);
+           try {
++            // Get file size before deleting
++            try {
++              const stats = await fs.stat(filePath);
++              deletedBytes += stats.size;
++            } catch {
++              // Can't stat file
++            }
++
+             await fs.unlink(filePath);
+             this.messageCache.delete(messageId);
+             deletedCount++;
+@@ -1124,6 +1217,13 @@ class AgentCommServer {
+       this.messageIndex = {};
+       await this.saveIndex();
+       this.messageCache.clear();
++
++      // Update storage metrics
++      if (deletedBytes > 0) {
++        this.metrics.total_storage_bytes = Math.max(0, this.metrics.total_storage_bytes - deletedBytes);
++        await this.saveMetrics();
++      }
+     }
+
+     return {

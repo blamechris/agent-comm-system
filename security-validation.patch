@@ -1,0 +1,139 @@
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -228,6 +228,30 @@ class AgentCommServer {
+     }
+   }
+
++  /**
++   * Validate agent name to prevent path traversal attacks
++   */
++  private validateAgentName(agent: string): void {
++    if (!agent || typeof agent !== 'string') {
++      throw new Error('Agent name must be a non-empty string');
++    }
++
++    if (!/^[a-zA-Z0-9_-]+$/.test(agent)) {
++      throw new Error('Invalid agent name. Must contain only letters, numbers, underscores, and hyphens.');
++    }
++
++    if (agent.length > 255) {
++      throw new Error('Agent name too long. Maximum 255 characters.');
++    }
++
++    if (agent.trim() !== agent) {
++      throw new Error('Agent name cannot start or end with whitespace.');
++    }
++  }
++
+   /**
+    * Get the directory path for a specific agent's messages
+    */
+@@ -271,6 +295,14 @@ class AgentCommServer {
+         if (dirent.isDirectory()) {
+           const agent = dirent.name;
++
++          // Validate directory name - skip invalid directories
++          try {
++            this.validateAgentName(agent);
++          } catch (error) {
++            console.error(`[Index Rebuild] Skipping invalid directory: ${agent}`, error instanceof Error ? error.message : error);
++            continue;
++          }
++
+           const agentDir = this.getAgentDir(agent);
+           const files = await fs.readdir(agentDir);
+
+@@ -328,6 +360,14 @@ class AgentCommServer {
+         if (dirent.isDirectory()) {
+           const agent = dirent.name;
++
++          // Validate directory name - skip invalid directories
++          try {
++            this.validateAgentName(agent);
++          } catch (error) {
++            console.error(`[Metrics Rebuild] Skipping invalid directory: ${agent}`, error instanceof Error ? error.message : error);
++            continue;
++          }
++
+           const agentDir = this.getAgentDir(agent);
+           const files = await fs.readdir(agentDir);
+
+@@ -744,6 +784,10 @@ class AgentCommServer {
+       throw new Error("Missing required parameters: from, to, and content are required");
+     }
+
++    // Validate agent names to prevent path traversal
++    this.validateAgentName(from);
++    this.validateAgentName(to);
++
+     const timestamp = new Date().toISOString();
+     const messageId = `${from}-${Date.now()}`;
+     const fileName = `${messageId}.json`;
+@@ -794,6 +838,9 @@ class AgentCommServer {
+       throw new Error("Missing required parameter: agent");
+     }
+
++    // Validate agent name to prevent path traversal
++    this.validateAgentName(agent);
++
+     // Use index to get message IDs for this agent
+     const messageIds = this.messageIndex[agent] || [];
+
+@@ -866,6 +913,11 @@ class AgentCommServer {
+   private async handleListMessages(args: ListMessagesArgs) {
+     const { agent, limit = DEFAULT_PAGE_LIMIT, offset = 0 } = args;
+
++    // Validate agent name if provided
++    if (agent) {
++      this.validateAgentName(agent);
++    }
++
+     const messageList: Array<MessageMetadata & { id: string }> = [];
+
+     if (agent) {
+@@ -976,6 +1028,9 @@ class AgentCommServer {
+       throw new Error(`Failed to delete message: ${message_id} not found`);
+     }
+
++    // Validate the agent name (defense in depth - in case index was tampered with)
++    this.validateAgentName(foundAgent);
++
+     const fileName = `${message_id}.json`;
+     const agentDir = this.getAgentDir(foundAgent);
+     const filePath = path.join(agentDir, fileName);
+@@ -1008,6 +1063,11 @@ class AgentCommServer {
+     const { agent } = args;
+     let deletedCount = 0;
+
++    // Validate agent name if provided
++    if (agent) {
++      this.validateAgentName(agent);
++    }
++
+     if (agent) {
+       // Clear messages for specific agent
+       const messageIds = this.messageIndex[agent] || [];
+@@ -1078,6 +1138,11 @@ class AgentCommServer {
+   private async handleGetAgentStats(args: GetAgentStatsArgs) {
+     const { agent } = args;
+
++    // Validate agent name if provided
++    if (agent) {
++      this.validateAgentName(agent);
++    }
++
+     if (agent) {
+       // Get stats for specific agent
+       const agentMetrics = this.metrics.agents[agent];
+@@ -1272,6 +1337,11 @@ class AgentCommServer {
+   private async handleGetActivityStats(args: GetActivityStatsArgs) {
+     const { start_date, end_date, agent } = args;
+
++    // Validate agent name if provided
++    if (agent) {
++      this.validateAgentName(agent);
++    }
++
+     let dailyActivity = { ...this.metrics.daily_activity };
+     let hourlyActivity = { ...this.metrics.hourly_activity };
+

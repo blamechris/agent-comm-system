@@ -10,7 +10,6 @@ import {
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
-import { randomUUID } from "crypto";
 
 // Default storage directory
 const DEFAULT_STORAGE_DIR = path.join(os.homedir(), ".agent-comm-system", "messages");
@@ -18,11 +17,6 @@ const INDEX_FILE = "index.json";
 const METRICS_FILE = "metrics.json";
 const DEFAULT_CACHE_SIZE = 100;
 const DEFAULT_PAGE_LIMIT = 50;
-
-// Storage limits (configurable via environment variables)
-const MAX_MESSAGE_SIZE = parseInt(process.env.MAX_MESSAGE_SIZE || "1048576"); // 1 MB default
-const MAX_TOTAL_STORAGE = parseInt(process.env.MAX_TOTAL_STORAGE || "1073741824"); // 1 GB default
-const MAX_SUBJECT_LENGTH = parseInt(process.env.MAX_SUBJECT_LENGTH || "500"); // 500 characters default
 
 interface MessageMetadata {
   from: string;
@@ -179,9 +173,6 @@ class AgentCommServer {
   private indexPath: string;
   private metrics: Metrics;
   private metricsPath: string;
-  private metricsSaveTimer: NodeJS.Timeout | null = null;
-  private readonly METRICS_SAVE_DEBOUNCE_MS = 5000; // 5 seconds
-  private metricsNeedsSave = false;
 
   constructor(storageDir?: string, cacheSize: number = DEFAULT_CACHE_SIZE) {
     this.storageDir = storageDir || DEFAULT_STORAGE_DIR;
@@ -224,18 +215,7 @@ class AgentCommServer {
     };
 
     process.on("SIGINT", async () => {
-      console.log("\nGracefully shutting down...");
-
-      // Clear debounce timer and save immediately
-      if (this.metricsSaveTimer) {
-        clearTimeout(this.metricsSaveTimer);
-        this.metricsSaveTimer = null;
-      }
-
-      // Save both index and metrics
       await this.saveIndex();
-      await this.saveMetrics();
-
       await this.server.close();
       process.exit(0);
     });
@@ -487,27 +467,6 @@ class AgentCommServer {
   }
 
   /**
-   * Schedule a debounced metrics save
-   */
-  private scheduleMetricsSave(): void {
-    this.metricsNeedsSave = true;
-
-    if (this.metricsSaveTimer) {
-      clearTimeout(this.metricsSaveTimer);
-    }
-
-    this.metricsSaveTimer = setTimeout(() => {
-      if (this.metricsNeedsSave) {
-        this.saveMetrics().catch(error =>
-          console.error('[Metrics Save Error]', error)
-        );
-        this.metricsNeedsSave = false;
-      }
-      this.metricsSaveTimer = null;
-    }, this.METRICS_SAVE_DEBOUNCE_MS);
-  }
-
-  /**
    * Update metrics when a message is sent
    */
   private updateMetricsOnSend(from: string, to: string): void {
@@ -569,7 +528,8 @@ class AgentCommServer {
    */
   private trackCacheHit(): void {
     this.metrics.cache_hits++;
-    this.scheduleMetricsSave(); // Debounced save
+    // Save metrics asynchronously
+    this.saveMetrics().catch((error) => console.error("[Metrics Save Error]", error));
   }
 
   /**
@@ -577,7 +537,8 @@ class AgentCommServer {
    */
   private trackCacheMiss(): void {
     this.metrics.cache_misses++;
-    this.scheduleMetricsSave(); // Debounced save
+    // Save metrics asynchronously
+    this.saveMetrics().catch((error) => console.error("[Metrics Save Error]", error));
   }
 
   /**
@@ -949,13 +910,7 @@ class AgentCommServer {
   private async handleListMessages(args: ListMessagesArgs) {
     const { agent, limit = DEFAULT_PAGE_LIMIT, offset = 0 } = args;
 
-    const messageList
-
-    // Validate agent name if provided
-    if (agent) {
-      this.validateAgentName(agent);
-    }
-: Array<MessageMetadata & { id: string }> = [];
+    const messageList: Array<MessageMetadata & { id: string }> = [];
 
     if (agent) {
       // List messages for specific agent using index
@@ -1098,65 +1053,9 @@ class AgentCommServer {
     const filePath = path.join(agentDir, fileName);
 
     try {
-      // Read message BEFORE deleting to update metrics
-      const messageContent = await fs.readFile(filePath, "utf-8");
-      const deletedMessage = JSON.parse(messageContent) as Message;
-
-      // Get file size before deletion for storage metrics
-      const stats = await fs.stat(filePath);
-      const fileSize = stats.size;
-
-      // Delete the file
       await fs.unlink(filePath);
       await this.removeFromIndex(foundAgent, message_id);
       this.messageCache.delete(message_id);
-
-      // Update ALL metrics comprehensively
-      this.metrics.total_messages--;
-      this.metrics.total_storage_bytes -= fileSize;
-
-      // Update agent-specific metrics
-      if (this.metrics.agents[deletedMessage.from]) {
-        this.metrics.agents[deletedMessage.from].sent_count--;
-
-        // Update partner counts
-        const partners = this.metrics.agents[deletedMessage.from].most_active_partners;
-        if (partners[deletedMessage.to]) {
-          partners[deletedMessage.to]--;
-          if (partners[deletedMessage.to] === 0) {
-            delete partners[deletedMessage.to];
-          }
-        }
-      }
-
-      if (this.metrics.agents[deletedMessage.to]) {
-        this.metrics.agents[deletedMessage.to].received_count--;
-      }
-
-      // Update temporal metrics (daily and hourly activity)
-      const date = new Date(deletedMessage.timestamp);
-      const dateStr = date.toISOString().split("T")[0];
-      const hour = date.getHours().toString();
-
-      if (dateStr && this.metrics.daily_activity[dateStr]) {
-        this.metrics.daily_activity[dateStr]--;
-        if (this.metrics.daily_activity[dateStr] === 0) {
-          delete this.metrics.daily_activity[dateStr];
-        }
-      }
-
-      if (this.metrics.hourly_activity[hour]) {
-        this.metrics.hourly_activity[hour]--;
-        if (this.metrics.hourly_activity[hour] === 0) {
-          delete this.metrics.hourly_activity[hour];
-        }
-      }
-
-      // NOTE: first_message and last_message timestamps are expensive to update
-      // They may become inaccurate after deletions unless we rebuild
-      // Document this behavior or trigger selective rebuild for boundary messages
-
-      await this.saveMetrics();
 
       return {
         content: [
@@ -1176,12 +1075,6 @@ class AgentCommServer {
     let deletedCount = 0;
 
     if (agent) {
-
-    // Validate agent name if provided
-    if (agent) {
-      this.validateAgentName(agent);
-    }
-
       // Clear messages for specific agent
       const messageIds = this.messageIndex[agent] || [];
       const agentDir = this.getAgentDir(agent);
@@ -1189,61 +1082,15 @@ class AgentCommServer {
       for (const messageId of messageIds) {
         const filePath = path.join(agentDir, `${messageId}.json`);
         try {
-          // Read message before deleting to update metrics
-          const messageContent = await fs.readFile(filePath, "utf-8");
-          const deletedMessage = JSON.parse(messageContent) as Message;
-          const stats = await fs.stat(filePath);
-          const fileSize = stats.size;
-
           await fs.unlink(filePath);
           this.messageCache.delete(messageId);
           deletedCount++;
-
-          // Update metrics
-          this.metrics.total_messages--;
-          this.metrics.total_storage_bytes -= fileSize;
-
-          // Update agent-specific metrics
-          if (this.metrics.agents[deletedMessage.from]) {
-            this.metrics.agents[deletedMessage.from].sent_count--;
-            const partners = this.metrics.agents[deletedMessage.from].most_active_partners;
-            if (partners[deletedMessage.to]) {
-              partners[deletedMessage.to]--;
-              if (partners[deletedMessage.to] === 0) {
-                delete partners[deletedMessage.to];
-              }
-            }
-          }
-
-          if (this.metrics.agents[deletedMessage.to]) {
-            this.metrics.agents[deletedMessage.to].received_count--;
-          }
-
-          // Update temporal metrics
-          const date = new Date(deletedMessage.timestamp);
-          const dateStr = date.toISOString().split("T")[0];
-          const hour = date.getHours().toString();
-
-          if (dateStr && this.metrics.daily_activity[dateStr]) {
-            this.metrics.daily_activity[dateStr]--;
-            if (this.metrics.daily_activity[dateStr] === 0) {
-              delete this.metrics.daily_activity[dateStr];
-            }
-          }
-
-          if (this.metrics.hourly_activity[hour]) {
-            this.metrics.hourly_activity[hour]--;
-            if (this.metrics.hourly_activity[hour] === 0) {
-              delete this.metrics.hourly_activity[hour];
-            }
-          }
         } catch {
           // File already deleted or doesn't exist
         }
       }
 
       await this.clearAgentFromIndex(agent);
-      await this.saveMetrics();
 
       // Try to remove the agent directory if it's empty
       try {
@@ -1259,54 +1106,9 @@ class AgentCommServer {
         for (const messageId of messageIds) {
           const filePath = path.join(agentDir, `${messageId}.json`);
           try {
-            // Read message before deleting to update metrics
-            const messageContent = await fs.readFile(filePath, "utf-8");
-            const deletedMessage = JSON.parse(messageContent) as Message;
-            const stats = await fs.stat(filePath);
-            const fileSize = stats.size;
-
             await fs.unlink(filePath);
             this.messageCache.delete(messageId);
             deletedCount++;
-
-            // Update metrics
-            this.metrics.total_messages--;
-            this.metrics.total_storage_bytes -= fileSize;
-
-            // Update agent-specific metrics
-            if (this.metrics.agents[deletedMessage.from]) {
-              this.metrics.agents[deletedMessage.from].sent_count--;
-              const partners = this.metrics.agents[deletedMessage.from].most_active_partners;
-              if (partners[deletedMessage.to]) {
-                partners[deletedMessage.to]--;
-                if (partners[deletedMessage.to] === 0) {
-                  delete partners[deletedMessage.to];
-                }
-              }
-            }
-
-            if (this.metrics.agents[deletedMessage.to]) {
-              this.metrics.agents[deletedMessage.to].received_count--;
-            }
-
-            // Update temporal metrics
-            const date = new Date(deletedMessage.timestamp);
-            const dateStr = date.toISOString().split("T")[0];
-            const hour = date.getHours().toString();
-
-            if (dateStr && this.metrics.daily_activity[dateStr]) {
-              this.metrics.daily_activity[dateStr]--;
-              if (this.metrics.daily_activity[dateStr] === 0) {
-                delete this.metrics.daily_activity[dateStr];
-              }
-            }
-
-            if (this.metrics.hourly_activity[hour]) {
-              this.metrics.hourly_activity[hour]--;
-              if (this.metrics.hourly_activity[hour] === 0) {
-                delete this.metrics.hourly_activity[hour];
-              }
-            }
           } catch {
             // File already deleted
           }
@@ -1324,19 +1126,6 @@ class AgentCommServer {
       this.messageIndex = {};
       await this.saveIndex();
       this.messageCache.clear();
-
-      // Reset all metrics since everything is cleared
-      this.metrics = {
-        total_messages: 0,
-        total_storage_bytes: 0,
-        cache_hits: this.metrics.cache_hits, // Preserve cache stats
-        cache_misses: this.metrics.cache_misses,
-        agents: {},
-        daily_activity: {},
-        hourly_activity: {},
-        last_updated: new Date().toISOString(),
-      };
-      await this.saveMetrics();
     }
 
     return {
@@ -1355,12 +1144,6 @@ class AgentCommServer {
     const { agent } = args;
 
     if (agent) {
-
-    // Validate agent name if provided
-    if (agent) {
-      this.validateAgentName(agent);
-    }
-
       // Get stats for specific agent
       const agentMetrics = this.metrics.agents[agent];
 
@@ -1554,13 +1337,7 @@ Cache Performance:
   private async handleGetActivityStats(args: GetActivityStatsArgs) {
     const { start_date, end_date, agent } = args;
 
-    let dailyActivity
-
-    // Validate agent name if provided
-    if (agent) {
-      this.validateAgentName(agent);
-    }
- = { ...this.metrics.daily_activity };
+    let dailyActivity = { ...this.metrics.daily_activity };
     let hourlyActivity = { ...this.metrics.hourly_activity };
 
     // Filter by date range if specified
