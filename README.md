@@ -4,6 +4,17 @@ An MCP (Model Context Protocol) server that facilitates local communication betw
 
 📚 **[Quick Start Guide](QUICKSTART.md)** | 📖 **[Usage Examples](EXAMPLES.md)**
 
+## 🔔 What's New in v2.2.0
+
+Version 2.2 adds the **portable delivery layer** so a recipient gets _pinged_ to check its
+mailbox — no daemon required:
+
+- **One-shot CLI**: `agent-comm-system unread|peek|next <agent>` — query or drain a mailbox
+  without speaking MCP (for hooks and scripts). `AGENT_COMM_STORAGE` overrides the location.
+- **Claude Code Stop hook** (`hooks/mailbox-stop-hook.mjs`): when an agent finishes a turn,
+  it's told to drain any unread mail via `receive_next`. Non-destructive, loop-safe. See
+  [Delivery: ping on idle](#delivery-ping-on-idle-claude-code-stop-hook-v22).
+
 ## 📬 What's New in v2.1.0
 
 Version 2.1 turns the per-agent store into a true FIFO **mailbox queue** plus an optional
@@ -312,6 +323,39 @@ the recipient — see the project plan for the delivery layer.
 **Backward compatibility:** messages written by v2.0 (no `id`/`read` fields) are treated
 as unread, get an `id` derived from their filename, and are backfilled on first
 `receive_next`. No migration step is required.
+
+## Command-line interface (v2.2)
+
+The same binary doubles as a one-shot CLI for non-MCP consumers (hooks, scripts) that need
+to query or drain a mailbox without speaking the MCP stdio protocol. Run with no arguments
+it is the MCP server; with a subcommand it is the CLI:
+
+```bash
+agent-comm-system unread <agent>          # prints the unread count
+agent-comm-system peek <agent>            # prints unread messages as a JSON array (no consume)
+agent-comm-system next <agent> [--peek]   # prints the next unread message as JSON (consumes unless --peek)
+```
+
+The mailbox location can be overridden with `AGENT_COMM_STORAGE` (default
+`~/.agent-comm-system/messages`).
+
+## Delivery: ping on idle (Claude Code Stop hook, v2.2)
+
+`hooks/mailbox-stop-hook.mjs` is the portable half of the delivery layer: a Claude Code
+**Stop** hook that, whenever an agent finishes a turn, checks that agent's mailbox and — if
+unread messages are waiting — tells the agent to drain them via `receive_next`. It is
+non-destructive (peek-only; the agent consumes), loop-safe (honors `stop_hook_active`), and
+needs no daemon. Set `AGENT_COMM_ID` to the agent's mailbox id and register the hook in
+`.claude/settings.json` — see **[hooks/README.md](hooks/README.md)** for the full setup.
+
+```bash
+echo '{"stop_hook_active":false}' | AGENT_COMM_ID=coder node hooks/mailbox-stop-hook.mjs
+# → {"decision":"block","reason":"📬 You have N unread mailbox message(s) ..."}  (when mail waits)
+```
+
+For an _immediate_ interrupt of a live session (instead of at the next idle), a daemon such
+as chroxy can consume `AGENT_COMM_EMIT_WEBHOOK` and inject a wakeup into the running
+session — a separate, optional layer.
 
 ## Workflow Examples
 

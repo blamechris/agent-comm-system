@@ -154,7 +154,7 @@ class AgentCommServer {
   private indexPath: string;
 
   constructor(storageDir?: string, cacheSize: number = DEFAULT_CACHE_SIZE) {
-    this.storageDir = storageDir || DEFAULT_STORAGE_DIR;
+    this.storageDir = storageDir || process.env.AGENT_COMM_STORAGE || DEFAULT_STORAGE_DIR;
     this.indexPath = path.join(path.dirname(this.storageDir), INDEX_FILE);
     this.messageCache = new LRUCache<string, Message>(cacheSize);
     this.messageIndex = {};
@@ -1085,24 +1085,127 @@ class AgentCommServer {
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // One-shot CLI surface (non-MCP), consumed by hooks / scripts that need to
+  // query or drain a mailbox without speaking the MCP stdio protocol. Each
+  // method loads the on-disk index first since the CLI is a fresh process.
+  // ---------------------------------------------------------------------------
+
+  private async loadForCli(): Promise<void> {
+    await this.ensureStorageDir();
+    await this.loadIndex();
+  }
+
+  /** Count of unread messages for an agent (loads the on-disk index first). */
+  async cliUnreadCount(agent: string): Promise<number> {
+    await this.loadForCli();
+    return this.countUnread(agent);
+  }
+
+  /** All unread messages for an agent, oldest-first, WITHOUT consuming them. */
+  async cliPeekUnread(agent: string): Promise<Message[]> {
+    await this.loadForCli();
+    const messages = await this.getAgentMessages(agent);
+    return messages.filter((m) => !m.read);
+  }
+
+  /** Oldest unread message; marks it read unless peek=true. Null when none. */
+  async cliReceiveNext(agent: string, peek = false): Promise<Message | null> {
+    await this.loadForCli();
+    const messages = await this.getAgentMessages(agent);
+    const next = messages.find((m) => !m.read);
+    if (!next) {
+      return null;
+    }
+    if (peek) {
+      return next;
+    }
+    const messageId = next.id ?? `${next.from}-${new Date(next.timestamp).getTime()}`;
+    return this.markRead(agent, messageId, next);
+  }
+
   async run() {
     await this.ensureStorageDir();
     await this.loadIndex();
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error("Agent Communication MCP Server v2.1.0 running on stdio");
+    console.error("Agent Communication MCP Server v2.2.0 running on stdio");
     console.error(`Loaded index with ${Object.keys(this.messageIndex).length} agent(s)`);
   }
 }
 
+/**
+ * One-shot CLI entrypoint. Returns a process exit code. Honors
+ * AGENT_COMM_STORAGE for the mailbox location (default ~/.agent-comm-system).
+ *
+ *   agent-comm-system unread <agent>          # prints the unread count
+ *   agent-comm-system peek <agent>            # prints unread messages as JSON (no consume)
+ *   agent-comm-system next <agent> [--peek]   # prints the next unread message as JSON
+ */
+async function runCli(argv: string[]): Promise<number> {
+  const [cmd, agent, ...rest] = argv;
+  const peek = rest.includes("--peek");
+  const out = (line: string) => process.stdout.write(`${line}\n`);
+  const usage =
+    "Commands:\n" +
+    "  unread <agent>           Print the number of unread messages\n" +
+    "  peek <agent>             Print all unread messages as a JSON array (no consume)\n" +
+    "  next <agent> [--peek]    Print the next unread message as JSON (consumes unless --peek)";
+
+  if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") {
+    out(usage);
+    return cmd ? 0 : 2;
+  }
+
+  if ((cmd === "unread" || cmd === "peek" || cmd === "next") && !agent) {
+    console.error(`Missing <agent> for "${cmd}".\n\n${usage}`);
+    return 2;
+  }
+
+  const server = new AgentCommServer();
+
+  switch (cmd) {
+    case "unread": {
+      out(String(await server.cliUnreadCount(agent as string)));
+      return 0;
+    }
+    case "peek": {
+      out(JSON.stringify(await server.cliPeekUnread(agent as string)));
+      return 0;
+    }
+    case "next": {
+      out(JSON.stringify(await server.cliReceiveNext(agent as string, peek)));
+      return 0;
+    }
+    default: {
+      console.error(`Unknown command: ${cmd}\n\n${usage}`);
+      return 2;
+    }
+  }
+}
+
+export { runCli };
+
 // Export for testing
 export { AgentCommServer, LRUCache, type Message, type MessageMetadata, type MessageIndex };
 
-// Main execution (only run if this file is executed directly)
+// Main execution (only run if this file is executed directly).
+// With no arguments it runs the MCP stdio server (how MCP clients launch it);
+// with a subcommand it runs the one-shot CLI.
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const server = new AgentCommServer();
-  server.run().catch((error) => {
-    console.error("Fatal error running server:", error);
-    process.exit(1);
-  });
+  const cliArgs = process.argv.slice(2);
+  if (cliArgs.length > 0) {
+    runCli(cliArgs)
+      .then((code) => process.exit(code))
+      .catch((error) => {
+        console.error("CLI error:", error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      });
+  } else {
+    const server = new AgentCommServer();
+    server.run().catch((error) => {
+      console.error("Fatal error running server:", error);
+      process.exit(1);
+    });
+  }
 }

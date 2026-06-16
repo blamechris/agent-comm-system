@@ -56,6 +56,19 @@ export default tseslint.config(
     },
   },
 
+  // Node ESM scripts (Claude Code hooks) — standalone .mjs run by `node`.
+  {
+    files: ["hooks/**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        process: "readonly",
+        console: "readonly",
+      },
+    },
+  },
+
   // Prettier integration (must be last)
   prettier
 );
