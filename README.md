@@ -4,6 +4,22 @@ An MCP (Model Context Protocol) server that facilitates local communication betw
 
 📚 **[Quick Start Guide](QUICKSTART.md)** | 📖 **[Usage Examples](EXAMPLES.md)**
 
+## 📬 What's New in v2.1.0
+
+Version 2.1 turns the per-agent store into a true FIFO **mailbox queue** plus an optional
+delivery hook:
+
+- **`receive_next`**: dequeue the oldest **unread** message and mark it read (drain a
+  mailbox as a queue); `peek: true` to look without consuming.
+- **`unread_count`**: how many messages are waiting for an agent.
+- **`ack`**: acknowledge + delete a processed message.
+- **Emit-on-send hook**: optional best-effort webhook (`AGENT_COMM_EMIT_WEBHOOK`) so an
+  external layer (a Claude Code idle hook, a daemon like chroxy) can _ping_ a recipient to
+  check its mailbox.
+- **Self-mailbox**: message yourself (`from === to`) for deferred self-tasks.
+- Fully **backward-compatible** with v2.0 message files. See
+  [Mailbox Queue (v2.1)](#mailbox-queue-v21).
+
 ## ⚡ What's New in v2.0.0
 
 Version 2.0 introduces significant performance and efficiency improvements:
@@ -210,6 +226,92 @@ clear_messages({
   agent: "coder"
 })
 ```
+
+### 6. receive_next
+
+Dequeue the **oldest unread** message for an agent (FIFO) and mark it read, so the next call returns the following message. This is the primary way to drain a mailbox as a queue.
+
+**Parameters:**
+
+- `agent` (string, required): The agent whose mailbox to read from
+- `peek` (boolean, optional): When `true`, return the next unread message **without** marking it read (default: `false`)
+
+**Example:**
+
+```
+receive_next({ agent: "coder" })
+// → the oldest unread message; "Remaining unread: N"
+
+receive_next({ agent: "coder", peek: true })
+// → same message, but it stays unread
+```
+
+### 7. unread_count
+
+Return the number of unread messages (not yet consumed via `receive_next`) for an agent.
+
+**Parameters:**
+
+- `agent` (string, required): The agent to count unread messages for
+
+**Example:**
+
+```
+unread_count({ agent: "coder" })
+// → "Unread messages for coder: 3"
+```
+
+### 8. ack
+
+Acknowledge a message as fully processed and delete it. Typically called after `receive_next` once the work the message described is complete.
+
+**Parameters:**
+
+- `message_id` (string, required): The ID of the message to acknowledge and remove
+
+**Example:**
+
+```
+ack({ message_id: "orchestrator-1699564800000" })
+```
+
+## Mailbox Queue (v2.1)
+
+`receive_next` / `unread_count` / `ack` turn the per-agent store into a true FIFO
+**mailbox queue**:
+
+- Messages carry a `read` flag (and an `id`/`readAt`). `read_messages` is still a pure,
+  non-consuming read; `receive_next` is the consuming dequeue.
+- Drain pattern an agent runs to process its inbox oldest-first:
+
+  ```
+  while (unread_count({ agent: "me" }) > 0) {
+    const msg = receive_next({ agent: "me" });  // marks it read
+    // ...do the work the message describes...
+    ack({ message_id: msg.id });                // optional cleanup
+  }
+  ```
+
+- **Self-mailbox**: send to your own id (`from === to`) to leave yourself a deferred
+  task, then drain it later with `receive_next`.
+
+### Delivery hook (emit on send)
+
+So an external layer can _ping_ a recipient to check its mailbox, `send_message` fires an
+optional best-effort webhook when configured via environment variables:
+
+- `AGENT_COMM_EMIT_WEBHOOK` — URL to `POST` on every send, with body
+  `{ to, from, id, subject, unread_count }`.
+- `AGENT_COMM_EMIT_HEADER` — optional `Name: value` header (e.g. an auth token) added to
+  the request.
+
+The emit is fire-and-forget and capped (2s): a delivery outage **never** fails a send.
+This is the seam a Claude Code idle/Stop hook or a daemon (e.g. chroxy) consumes to wake
+the recipient — see the project plan for the delivery layer.
+
+**Backward compatibility:** messages written by v2.0 (no `id`/`read` fields) are treated
+as unread, get an `id` derived from their filename, and are backfilled on first
+`receive_next`. No migration step is required.
 
 ## Workflow Examples
 
