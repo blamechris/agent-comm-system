@@ -168,3 +168,53 @@ Each agent only needs to know their immediate upstream and downstream agents!
 4. **Orchestrator** → sends final decision to **Executor**
 
 This enables true parallel processing without terminal juggling!
+
+## Scenario 5: Draining a mailbox as a FIFO queue (v2.1)
+
+Instead of re-reading the whole inbox, an agent consumes messages oldest-first:
+
+```
+// Coder, on waking up, processes everything waiting for it:
+unread_count({ agent: "coder" })
+// → "Unread messages for coder: 2"
+
+receive_next({ agent: "coder" })
+// → oldest unread (e.g. "Implement login page"); now marked read
+//   "Remaining unread: 1"
+
+// ...do the work...
+ack({ message_id: "orchestrator-1699564800000" })   // optional cleanup
+
+receive_next({ agent: "coder" })
+// → next oldest ("Add tests"); "Remaining unread: 0"
+
+receive_next({ agent: "coder" })
+// → "No unread messages for agent: coder"
+```
+
+`receive_next({ agent: "coder", peek: true })` shows the next message without consuming it.
+
+### Self-mailbox (deferred self-tasks)
+
+An agent can leave itself a note to pick up later — useful for long jobs that span turns:
+
+```
+send_message({ from: "coder", to: "coder", subject: "resume", content: "After CI: cut the release tag" })
+// ...later...
+receive_next({ agent: "coder" })   // → "After CI: cut the release tag"
+```
+
+### Pinging a recipient on send (delivery hook)
+
+Run the server with `AGENT_COMM_EMIT_WEBHOOK` set so every send notifies an external
+delivery layer (a Claude Code idle hook, or a daemon like chroxy) that can wake the
+recipient to drain its queue:
+
+```
+AGENT_COMM_EMIT_WEBHOOK="https://my-daemon.local/mailbox" \
+AGENT_COMM_EMIT_HEADER="Authorization: Bearer <token>" \
+  agent-comm-system
+
+# every send_message then fires (best-effort, never blocks the send):
+# POST { to, from, id, subject, unread_count }
+```

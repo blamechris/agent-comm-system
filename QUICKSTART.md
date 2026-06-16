@@ -86,6 +86,24 @@ Then in a different Claude instance (or the same one), read the message:
 
 - Make sure the dist/index.js file is executable: `chmod +x dist/index.js`
 
+## Mailbox queue (v2.1)
+
+Drain your inbox oldest-first instead of re-reading everything:
+
+```
+unread_count({ agent: "coder" })          // how many are waiting
+receive_next({ agent: "coder" })          // dequeue the oldest UNREAD (marks it read)
+ack({ message_id: "<id from receive_next>" })  // optional: delete once handled
+```
+
+Repeat `receive_next` until it reports "No unread messages". Use
+`receive_next({ agent, peek: true })` to look without consuming. Send to your own id to
+leave yourself a deferred task.
+
+**Ping on send (optional):** set `AGENT_COMM_EMIT_WEBHOOK` (and optionally
+`AGENT_COMM_EMIT_HEADER: "Name: value"`) and every send fires a best-effort
+`POST { to, from, id, subject, unread_count }` so an external layer can wake the recipient.
+
 ## Support
 
 For issues or questions, please open an issue on GitHub.

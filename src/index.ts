@@ -22,6 +22,19 @@ interface MessageMetadata {
   to: string;
   timestamp: string;
   subject?: string;
+  /**
+   * Stable message id (also the file stem). Persisted in the body since v2.1;
+   * messages written by older versions omit it and have it derived from the
+   * filename on read.
+   */
+  id?: string;
+  /**
+   * Mailbox-queue consume state (v2.1). `receive_next` flips this to true.
+   * Messages written by older versions omit it and are treated as unread.
+   */
+  read?: boolean;
+  /** ISO timestamp set when the message is consumed via `receive_next` (v2.1). */
+  readAt?: string;
 }
 
 interface Message extends MessageMetadata {
@@ -66,6 +79,19 @@ interface DeleteMessageArgs {
 
 interface ClearMessagesArgs {
   agent?: string;
+}
+
+interface ReceiveNextArgs {
+  agent?: string;
+  peek?: boolean;
+}
+
+interface UnreadCountArgs {
+  agent?: string;
+}
+
+interface AckArgs {
+  message_id?: string;
 }
 
 /**
@@ -136,7 +162,7 @@ class AgentCommServer {
     this.server = new Server(
       {
         name: "agent-comm-system",
-        version: "2.0.0",
+        version: "2.1.0",
       },
       {
         capabilities: {
@@ -263,6 +289,145 @@ class AgentCommServer {
     await this.saveIndex();
   }
 
+  /**
+   * Load a message by id from cache or disk, normalizing v2.1 fields for
+   * backward compatibility (missing `id` ← filename, missing `read` ← false).
+   * Returns null when the file is missing.
+   */
+  private async loadMessage(agent: string, messageId: string): Promise<Message | null> {
+    let message = this.messageCache.get(messageId);
+    if (!message) {
+      const filePath = path.join(this.getAgentDir(agent), `${messageId}.json`);
+      try {
+        const content = await fs.readFile(filePath, "utf-8");
+        message = JSON.parse(content) as Message;
+      } catch {
+        return null;
+      }
+    }
+    const normalized: Message = {
+      ...message,
+      id: message.id ?? messageId,
+      read: message.read ?? false,
+    };
+    this.messageCache.set(messageId, normalized);
+    return normalized;
+  }
+
+  /**
+   * Load every message for an agent (cache-first), sorted oldest-first (FIFO).
+   * A stable sort keeps same-millisecond messages in index (send) order.
+   */
+  private async getAgentMessages(agent: string): Promise<Message[]> {
+    const messageIds = this.messageIndex[agent] || [];
+    const messages: Message[] = [];
+    for (const messageId of messageIds) {
+      const message = await this.loadMessage(agent, messageId);
+      if (message) {
+        messages.push(message);
+      }
+    }
+    messages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return messages;
+  }
+
+  /**
+   * Count unread (`read !== true`) messages for an agent.
+   */
+  private async countUnread(agent: string): Promise<number> {
+    const messages = await this.getAgentMessages(agent);
+    return messages.filter((m) => !m.read).length;
+  }
+
+  /**
+   * Persist `read = true` (+ `readAt`) for a message and refresh the cache.
+   */
+  private async markRead(agent: string, messageId: string, message: Message): Promise<Message> {
+    const updated: Message = {
+      ...message,
+      id: messageId,
+      read: true,
+      readAt: new Date().toISOString(),
+    };
+    const filePath = path.join(this.getAgentDir(agent), `${messageId}.json`);
+    await fs.writeFile(filePath, JSON.stringify(updated, null, 2));
+    this.messageCache.set(messageId, updated);
+    return updated;
+  }
+
+  /**
+   * Delete a message by id from disk, index, and cache. Returns the owning
+   * agent. Throws when the id is not present in the index.
+   */
+  private async deleteById(message_id: string): Promise<string> {
+    let foundAgent: string | null = null;
+    for (const [agent, messageIds] of Object.entries(this.messageIndex)) {
+      if (messageIds.includes(message_id)) {
+        foundAgent = agent;
+        break;
+      }
+    }
+
+    if (!foundAgent) {
+      throw new Error(`Failed to find message: ${message_id} not found`);
+    }
+
+    const filePath = path.join(this.getAgentDir(foundAgent), `${message_id}.json`);
+    try {
+      await fs.unlink(filePath);
+    } catch {
+      // File already gone — still reconcile the index and cache below.
+    }
+    await this.removeFromIndex(foundAgent, message_id);
+    this.messageCache.delete(message_id);
+    return foundAgent;
+  }
+
+  /**
+   * Best-effort "new mail" ping, consumed by an optional external delivery
+   * layer (e.g. a Claude Code idle hook or chroxy). Fires only when
+   * `AGENT_COMM_EMIT_WEBHOOK` is set. Capped (2s) and fully error-swallowed:
+   * a delivery outage must never fail a send.
+   */
+  private async emitOnSend(message: Message): Promise<void> {
+    const webhook = process.env.AGENT_COMM_EMIT_WEBHOOK;
+    if (!webhook) {
+      return;
+    }
+    try {
+      if (typeof fetch !== "function") {
+        return;
+      }
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const headerSpec = process.env.AGENT_COMM_EMIT_HEADER;
+      if (headerSpec && headerSpec.includes(":")) {
+        const idx = headerSpec.indexOf(":");
+        const name = headerSpec.slice(0, idx).trim();
+        const value = headerSpec.slice(idx + 1).trim();
+        if (name) {
+          headers[name] = value;
+        }
+      }
+      const unreadCount = await this.countUnread(message.to);
+      const body = JSON.stringify({
+        to: message.to,
+        from: message.from,
+        id: message.id ?? null,
+        subject: message.subject ?? null,
+        unread_count: unreadCount,
+      });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2000);
+      try {
+        await fetch(webhook, { method: "POST", headers, body, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      // Swallow — delivery is best-effort and must never break a send.
+    }
+  }
+
   private setupToolHandlers() {
     this.server.setRequestHandler(ListToolsRequestSchema, () => {
       const tools: Tool[] = [
@@ -367,6 +532,56 @@ class AgentCommServer {
             },
           },
         },
+        {
+          name: "receive_next",
+          description:
+            "Dequeue the oldest UNREAD message for an agent (FIFO) and mark it read, so the next call returns the following message. This is the primary way to drain a mailbox as a queue. Pass peek=true to look at the next unread message without consuming it.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              agent: {
+                type: "string",
+                description: "The identifier of the agent whose mailbox to read from",
+              },
+              peek: {
+                type: "boolean",
+                description:
+                  "Optional: when true, return the next unread message WITHOUT marking it read (default: false)",
+              },
+            },
+            required: ["agent"],
+          },
+        },
+        {
+          name: "unread_count",
+          description:
+            "Return the number of unread messages (not yet consumed via receive_next) for an agent.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              agent: {
+                type: "string",
+                description: "The identifier of the agent to count unread messages for",
+              },
+            },
+            required: ["agent"],
+          },
+        },
+        {
+          name: "ack",
+          description:
+            "Acknowledge a message as fully processed and delete it. Typically called after receive_next once the work the message described is complete.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              message_id: {
+                type: "string",
+                description: "The ID of the message to acknowledge and remove",
+              },
+            },
+            required: ["message_id"],
+          },
+        },
       ];
 
       return { tools };
@@ -389,6 +604,12 @@ class AgentCommServer {
             return await this.handleDeleteMessage(args as DeleteMessageArgs);
           case "clear_messages":
             return await this.handleClearMessages(args as ClearMessagesArgs);
+          case "receive_next":
+            return await this.handleReceiveNext(args as ReceiveNextArgs);
+          case "unread_count":
+            return await this.handleUnreadCount(args as UnreadCountArgs);
+          case "ack":
+            return await this.handleAck(args as AckArgs);
           default:
             throw new Error(`Unknown tool: ${request.params.name}`);
         }
@@ -427,6 +648,8 @@ class AgentCommServer {
       from,
       to,
       timestamp,
+      id: messageId,
+      read: false,
       ...(subject && { subject }),
       content,
     };
@@ -436,6 +659,10 @@ class AgentCommServer {
     // Update index and cache
     await this.addToIndex(to, messageId);
     this.messageCache.set(messageId, message);
+
+    // Best-effort "new mail" ping for an optional external delivery layer
+    // (idle hook / chroxy). Never throws; never blocks success on a failure.
+    await this.emitOnSend(message);
 
     return {
       content: [
@@ -769,12 +996,101 @@ class AgentCommServer {
     };
   }
 
+  private async handleReceiveNext(args: ReceiveNextArgs) {
+    const { agent, peek = false } = args;
+
+    if (!agent) {
+      throw new Error("Missing required parameter: agent");
+    }
+
+    const messages = await this.getAgentMessages(agent);
+    const unreadTotal = messages.filter((m) => !m.read).length;
+    const next = messages.find((m) => !m.read);
+
+    if (!next) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `No unread messages for agent: ${agent}`,
+          },
+        ],
+      };
+    }
+
+    const messageId = next.id ?? `${next.from}-${new Date(next.timestamp).getTime()}`;
+
+    if (!peek) {
+      await this.markRead(agent, messageId, next);
+    }
+
+    const remainingUnread = peek ? unreadTotal : unreadTotal - 1;
+    const header = peek ? "Next unread message (peek)" : "Received next message";
+    const text =
+      `${header} for ${agent}:\n` +
+      `\n--- Message ---\n` +
+      `ID: ${messageId}\n` +
+      `From: ${next.from}\n` +
+      `To: ${next.to}\n` +
+      `Timestamp: ${next.timestamp}` +
+      `${next.subject ? `\nSubject: ${next.subject}` : ""}\n` +
+      `\nContent:\n${next.content}\n` +
+      `\n--- Queue ---\nRemaining unread: ${remainingUnread}`;
+
+    return {
+      content: [
+        {
+          type: "text",
+          text,
+        },
+      ],
+    };
+  }
+
+  private async handleUnreadCount(args: UnreadCountArgs) {
+    const { agent } = args;
+
+    if (!agent) {
+      throw new Error("Missing required parameter: agent");
+    }
+
+    const count = await this.countUnread(agent);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Unread messages for ${agent}: ${count}`,
+        },
+      ],
+    };
+  }
+
+  private async handleAck(args: AckArgs) {
+    const { message_id } = args;
+
+    if (!message_id) {
+      throw new Error("Missing required parameter: message_id");
+    }
+
+    await this.deleteById(message_id);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Message ${message_id} acknowledged and removed`,
+        },
+      ],
+    };
+  }
+
   async run() {
     await this.ensureStorageDir();
     await this.loadIndex();
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error("Agent Communication MCP Server v2.0.0 running on stdio");
+    console.error("Agent Communication MCP Server v2.1.0 running on stdio");
     console.error(`Loaded index with ${Object.keys(this.messageIndex).length} agent(s)`);
   }
 }
