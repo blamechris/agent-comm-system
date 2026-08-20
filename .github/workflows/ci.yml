@@ -128,7 +128,6 @@ jobs:
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - name: Configure Git line endings
-        shell: bash
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
@@ -160,7 +159,6 @@ jobs:
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - name: Configure Git line endings
-        shell: bash
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
@@ -189,7 +187,6 @@ jobs:
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - name: Configure Git line endings
-        shell: bash
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
@@ -229,7 +226,6 @@ jobs:
     runs-on: ${{ needs.determine-runner.outputs.runner-type == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - name: Configure Git line endings
-        shell: bash
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
@@ -253,10 +249,9 @@ jobs:
         run: npm run build
 
       - name: Verify build output
-        shell: bash
-        run: |
-          if [ ! -f "dist/index.js" ]; then
-            echo "Build failed: dist/index.js not found"
-            exit 1
-          fi
-          echo "Build successful: dist/index.js created"
+        # Node, not bash: this job also runs on the self-hosted Windows runner,
+        # whose default shell is PowerShell and which has no usable bash.
+        run: >-
+          node -e "if (!require('fs').existsSync('dist/index.js')) {
+          console.error('Build failed: dist/index.js not found'); process.exit(1); }
+          console.log('Build successful: dist/index.js created');"
