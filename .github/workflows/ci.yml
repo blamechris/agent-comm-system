@@ -32,14 +32,16 @@ jobs:
 
       - name: Determine runner
         id: runner-logic
+        # Free-text event values (commit message, PR title) must reach the shell
+        # via env, never ${{ }} interpolation inside run: — backticks or <angle
+        # brackets> in a commit message become shell syntax and kill the job.
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           echo "Event name: ${{ github.event_name }}"
-          echo "Commit message: ${{ github.event.head_commit.message }}"
-          echo "PR title: ${{ github.event.pull_request.title }}"
-
-          # Check for [skip-ci] in commit message or PR title
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
-          PR_TITLE="${{ github.event.pull_request.title }}"
+          echo "Commit message: $COMMIT_MSG"
+          echo "PR title: $PR_TITLE"
 
           if [[ -n "$COMMIT_MSG" && "$COMMIT_MSG" == *"[skip-ci]"* ]]; then
             echo "Skipping CI due to [skip-ci] in commit message"
